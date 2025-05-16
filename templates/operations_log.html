@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Журнал операций - Warehouse Manager</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="index.html">Warehouse Manager</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+                    <li class="nav-item">
+                        <a class="nav-link" href="index.html">Товары</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" aria-current="page" href="operations_log.html">Операции</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="reports.html">Отчеты</a>
+                    </li>
+                     <li class="nav-item">
+                        <a class="nav-link" href="categories.html">Категории</a>
+                    </li>
+                </ul>
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link" href="login.html">Выход</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid">
+        <div class="card">
+            <div class="card-header">
+                Фильтры журнала операций
+            </div>
+            <div class="card-body">
+                <form class="row g-3 align-items-end">
+                    <div class="col-md-4">
+                        <label for="dateRange" class="form-label">Период:</label>
+                        <div class="input-group">
+                            <input type="date" class="form-control form-control-sm-custom" id="startDate">
+                            <span class="input-group-text">-</span>
+                            <input type="date" class="form-control form-control-sm-custom" id="endDate">
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <label for="operationType" class="form-label">Тип операции:</label>
+                        <select class="form-select form-control-sm-custom" id="operationType">
+                            <option selected value="all">Все</option>
+                            <option value="incoming">Поступление</option>
+                            <option value="outgoing">Отгрузка</option>
+                        </select>
+                    </div>
+                    <div class="col-md-auto">
+                        <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-funnel-fill me-2"></i>Применить фильтр</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                Журнал операций
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover table-sm">
+                        <thead>
+                            <tr>
+                                <th scope="col">Дата</th>
+                                <th scope="col">Тип</th>
+                                <th scope="col">Товар</th>
+                                <th scope="col">Количество</th>
+                                <th scope="col">Номер накладной</th>
+                                <th scope="col">Поставщик/Получатель</th>
+                                <th scope="col">Комментарий</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>2024-05-15 10:30</td>
+                                <td><span class="badge bg-success">Поступление</span></td>
+                                <td>Ноутбук ProBook 15</td>
+                                <td>10</td>
+                                <td>НП-00123</td>
+                                <td>ООО "ТехноМир"</td>
+                                <td>Плановая поставка</td>
+                            </tr>
+                            <tr>
+                                <td>2024-05-15 14:05</td>
+                                <td><span class="badge bg-warning text-dark">Отгрузка</span></td>
+                                <td>Цемент M500</td>
+                                <td>200</td>
+                                <td>НР-00087</td>
+                                <td>ИП Стройкин</td>
+                                <td>Для объекта "Западный"</td>
+                            </tr>
+                            <tr>
+                                <td>2024-05-14 09:00</td>
+                                <td><span class="badge bg-success">Поступление</span></td>
+                                <td>Мука пшеничная</td>
+                                <td>150</td>
+                                <td>НП-00121</td>
+                                <td>ЗАО "АгроХолдинг"</td>
+                                <td></td>
+                            </tr>
+                            <tr>
+                                <td>2024-05-14 16:20</td>
+                                <td><span class="badge bg-warning text-dark">Отгрузка</span></td>
+                                <td>Ноутбук ProBook 15</td>
+                                <td>2</td>
+                                <td>НР-00085</td>
+                                <td>Физ. лицо А.Иванов</td>
+                                <td>Срочный заказ</td>
+                            </tr>
+                             <tr>
+                                <td>2024-05-13 11:00</td>
+                                <td><span class="badge bg-success">Поступление</span></td>
+                                <td>Смартфон Galaxy S24</td>
+                                <td>20</td>
+                                <td>НП-00119</td>
+                                <td>ООО "МобайлОпт"</td>
+                                <td>Новая партия</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="{{ url_for('static', filename='js/script.js') }}" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
+</body>
+</html>

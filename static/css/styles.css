@@ -1,0 +1,95 @@
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: #f8f9fa; /* Светло-серый фон для всего приложения */
+}
+
+.navbar {
+    margin-bottom: 20px; /* Отступ после навигационной панели */
+}
+
+.container, .container-fluid {
+    padding-top: 20px; /* Отступ сверху для основного контента */
+}
+
+.card {
+    margin-bottom: 20px; /* Отступ для карточек */
+}
+
+.form-control-sm-custom { /* Дополнительный класс для более компактных полей ввода */
+    height: calc(1.5em + .5rem + 2px);
+    padding: .25rem .5rem;
+    font-size: .875rem;
+    line-height: 1.5;
+    border-radius: .2rem;
+}
+
+.table th, .table td {
+    vertical-align: middle; /* Вертикальное выравнивание по центру в таблицах */
+}
+
+.table .action-icons a {
+    margin-right: 8px; /* Отступ для иконок действий */
+    color: #6c757d; /* Цвет иконок */
+}
+
+.table .action-icons a:hover {
+    color: #343a40; /* Цвет иконок при наведении */
+}
+
+.modal-header {
+    background-color: #0d6efd; /* Синий фон для заголовков модальных окон */
+    color: white;
+}
+
+.modal-header .btn-close {
+    filter: invert(1) grayscale(100%) brightness(200%); /* Белый крестик закрытия */
+}
+
+.btn-primary {
+    background-color: #0d6efd;
+    border-color: #0d6efd;
+}
+
+.btn-primary:hover {
+    background-color: #0b5ed7;
+    border-color: #0a58ca;
+}
+
+.btn-secondary {
+    background-color: #6c757d;
+    border-color: #6c757d;
+}
+
+.btn-secondary:hover {
+    background-color: #5a6268;
+    border-color: #545b62;
+}
+/* Стили для экрана входа */
+.login-container {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #e9ecef; /* Слегка отличающийся фон для страницы входа */
+}
+
+.login-card {
+    width: 100%;
+    max-width: 400px;
+    padding: 2rem;
+    border: none;
+    border-radius: 0.5rem;
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+}
+
+.login-card .form-floating label {
+    color: #6c757d;
+}
+
+.login-title {
+    margin-bottom: 1.5rem;
+    font-size: 1.75rem;
+    font-weight: 500;
+    text-align: center;
+    color: #343a40;
+}
