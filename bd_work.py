@@ -16,8 +16,6 @@ def insert_user_data(name,category, measure, description, position, minimum_to_w
 
             cursor.execute("SELECT * FROM categories WHERE name = %s", (category,))
             result = cursor.fetchone()
-
-            
             if not result:
                 print("Категории не существует!")
                 return
@@ -51,6 +49,11 @@ def insert_user_category(name, description): # добавить
         
         if connection.is_connected():
             cursor = connection.cursor()
+            cursor.execute("SELECT * FROM categories WHERE name = %s", (name,))
+            existing = cursor.fetchone()
+            if existing:
+                print(f"Категория с именем '{name}' уже существует.")
+                return
             # SQL-запрос на вставку данных
             insert_query = """
             INSERT INTO categories (name, description, num)
@@ -68,7 +71,7 @@ def insert_user_category(name, description): # добавить
             cursor.close()
             connection.close()
 
-def delete_user_category(name, description): # 
+def delete_user_category(name): # 
     try:
         # Подключение к базе данных
         connection = mysql.connector.connect(
@@ -88,8 +91,6 @@ def delete_user_category(name, description): #
                 return
             delete_query = "DELETE FROM categories WHERE name = %s"
             cursor.execute(delete_query, (name,))
-            data = (name)
-            cursor.execute(delete_query, data)
             connection.commit()
             print("Данные успешно удалены.")
 
@@ -136,3 +137,6 @@ def redact_user_category(old_name, name, description):
         if connection.is_connected():
             cursor.close()
             connection.close()
+
+
+            
