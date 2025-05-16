@@ -139,4 +139,39 @@ def redact_user_category(old_name, name, description):
             connection.close()
 
 
-            
+def register_product_arrival(productname, quantity, date, invoice_number, provider, comment=None):
+    try:
+        connection = mysql.connector.connect(
+            host='localhost',
+            database='warehouse',
+            user='root',
+            password='0000'
+        )
+
+        if connection.is_connected():
+            cursor = connection.cursor()
+
+            # Проверка существования продукта
+            cursor.execute("SELECT id FROM products WHERE name = %s", (productname,))
+            result = cursor.fetchone()
+            if not result:
+                print("Продукт не найден!")
+                return
+            product_id = result[0]
+
+            # Вставка в таблицу поступлений
+            insert_query = """
+            INSERT INTO product_incoming (product_id, quantity, date, invoice_number, provider, comment)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """
+            data = (product_id, quantity, date, invoice_number, provider, comment)
+            cursor.execute(insert_query, data)
+            connection.commit()
+            print("Поступление успешно зарегистрировано.")
+
+    except Error as e:
+        print(f"Ошибка при работе с MySQL: {e}")
+    finally:
+        if connection.is_connected():
+            cursor.close()
+            connection.close()
