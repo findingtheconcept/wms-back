@@ -152,11 +152,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 row.dataset.productId = product.id;
                 row.innerHTML = `
                     <td>${product.name}</td>
-                    <td>${product.category_name}</td>
-                    <td>${product.unit}</td>
-                    <td>${product.location}</td>
-                    <td>${product.min_stock}</td>
-                    <td>${product.current_stock} ${product.current_stock < product.min_stock ? '<i class="bi bi-exclamation-triangle-fill text-danger ms-1" title="Остаток ниже минимума"></i>' : ''}</td>
+                    <td>${product.category}</td>
+                    <td>${product.measure}</td>
+                    <td>${product.position}</td>
+                    <td>${product.minimum_to_warn}</td>
+                    <td>${product.stock} ${product.stock < product.minimum_to_warn ? '<i class="bi bi-exclamation-triangle-fill text-danger ms-1" title="Остаток ниже минимума"></i>' : ''}</td>
                     <td class="action-icons">
                         <a href="#" class="edit-product" title="Редактировать" data-bs-toggle="modal" data-bs-target="#editProductModal"><i class="bi bi-pencil-square"></i></a>
                         <a href="#" class="delete-product" title="Удалить" data-bs-toggle="modal" data-bs-target="#deleteProductModal"><i class="bi bi-trash3-fill"></i></a>

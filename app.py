@@ -3,7 +3,7 @@ import datetime
 import os
 import mysql.connector
 from mysql.connector import Error
-from bd_work import insert_user_data
+from bd_work import insert_user_data, register_product_arrival
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24) # Для использования сессий (например, для состояния входа)
@@ -206,26 +206,12 @@ def delete_category(category_id):
 # Товары
 @app.route('/api/products', methods=['GET'])
 def get_products():
-    conn = get_db_connection()
-    if conn is None:
+    products, message = register_product_arrival()
+    if "Ошибка" in message:
         return jsonify({"error": "Database connection failed"}), 500
-    cursor = conn.cursor(dictionary=True)
-    try:
-        cursor.execute("""
-            SELECT
-                p.id, p.name, p.category_id, c.name as category_name,
-                p.unit, p.location, p.min_stock, p.current_stock, p.description
-            FROM products p
-            LEFT JOIN categories c ON p.category_id = c.id
-        """)
-        products = cursor.fetchall()
+    else:
         return jsonify(products)
-    except mysql.connector.Error as e:
-        print(f"Error fetching products: {e}")
-        return jsonify({"error": "Error fetching products"}), 500
-    finally:
-        cursor.close()
-        conn.close()
+    
 
 @app.route('/api/products', methods=['POST'])
 def add_product():

@@ -3,7 +3,7 @@ from mysql.connector import Error
 
 def insert_user_data(name,category, measure, description, position, minimum_to_warn):
     try:    
-        message = ''                                                                            
+        #message = ''                                                                            
         # Подключение к базе данных
         connection = mysql.connector.connect(
             host='localhost',
@@ -39,6 +39,33 @@ def insert_user_data(name,category, measure, description, position, minimum_to_w
             cursor.close()
             connection.close()
         return message
+
+def register_product_arrival():
+    try:
+        connection = mysql.connector.connect(
+            host='localhost',
+            database='warehouse',
+            user='root',
+            password='0000'
+        )
+
+        if connection.is_connected():
+            cursor = connection.cursor(dictionary=True)
+
+            # Проверка существования продукта
+            cursor.execute("SELECT * FROM products")
+            data = cursor.fetchall()
+            return data, "Продукты успешно загружены"
+
+    except Error as e:
+        #print(f"Ошибка при работе с MySQL: {e}")
+        message = "Ошибка при работе с MySQL: " + e
+        return None, message
+    finally:
+        if connection.is_connected():
+            cursor.close()
+            connection.close()
+
 
 def insert_user_category(name, description): # добавить
     try:
@@ -196,7 +223,7 @@ def register_movement_by_name(product_name, quantity, date, doc_number, partner,
             cursor.close()
             connection.close()
 
-''' ТЕСТ БЛОК, СНЕСИТЕ ЕСЛИ НУЖНО
+'''#ТЕСТ БЛОК, СНЕСИТЕ ЕСЛИ НУЖНО
 insert_user_category(
     name="Электроника",
     description="Товары электронного назначения"
@@ -210,8 +237,9 @@ insert_user_data(
     position="Склад A, ряд 3",
     minimum_to_warn=10
 )
+'''
 
-
+'''
 register_movement_by_name("Блок питания 12V",100,"2025-05-15",
     doc_number="НАКЛ-007",
     partner="ООО ЭлектроПлюс",
