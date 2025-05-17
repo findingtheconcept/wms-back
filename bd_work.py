@@ -2,7 +2,8 @@ import mysql.connector
 from mysql.connector import Error
 
 def insert_user_data(name,category, measure, description, position, minimum_to_warn):
-    try:                                                                                
+    try:    
+        message = ''                                                                            
         # Подключение к базе данных
         connection = mysql.connector.connect(
             host='localhost',
@@ -22,10 +23,10 @@ def insert_user_data(name,category, measure, description, position, minimum_to_w
                 message = "Категории не существует!"
                 return message
             insert_query = """
-            INSERT INTO products (name, category, measure, description, position, minimum_to_warn)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            INSERT INTO products (name, category, measure, description, position, minimum_to_warn, stock)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             """
-            data = (name, category, measure, description, position, minimum_to_warn)
+            data = (name, category, measure, description, position, minimum_to_warn, 0)
             cursor.execute(insert_query, data)
             cursor.execute("UPDATE categories SET num = num + 1 WHERE name = %s", (category,))
             connection.commit()
@@ -87,7 +88,6 @@ def delete_user_category(name, description): #
                 print("Нельзя удалить категорию — существуют связанные товары.")
                 return
             delete_query = "DELETE FROM categories WHERE name = %s"
-            cursor.execute(delete_query, (name,))
             data = (name)
             cursor.execute(delete_query, data)
             connection.commit()
@@ -136,3 +136,97 @@ def redact_user_category(old_name, name, description):
         if connection.is_connected():
             cursor.close()
             connection.close()
+
+def register_movement_by_name(product_name, quantity, date, doc_number, partner, operation, comment=None):
+    try:
+        # Подключение к базе данных
+        connection = mysql.connector.connect(
+            host='localhost',
+            database='warehouse',
+            user='root',
+            password='0000'
+        )
+        if connection.is_connected():
+            cursor = connection.cursor()
+
+            # Получение ID и текущего остатка по имени товара
+            cursor.execute("SELECT id, stock FROM products WHERE name = %s", (product_name,))
+            result = cursor.fetchone()
+
+            if not result:
+                return f"Товар с именем '{product_name}' не найден."
+
+            product_id, current_stock = result
+
+            # Проверка на доступность при отгрузке
+            if operation == 'out':
+                if quantity > current_stock:
+                    return f"Недостаточно товара на складе. Текущий остаток: {current_stock}."
+
+            # Вычисление нового остатка
+            new_stock = current_stock + quantity if operation == 'in' else current_stock - quantity
+
+            # Обновление остатка
+            cursor.execute("UPDATE products SET stock = %s WHERE id = %s", (new_stock, product_id))
+
+            # Запись движения
+            cursor.execute("""
+                INSERT INTO movements (product_id, quantity, movement_date, doc_number, partner, operation, comment)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (
+                product_id,
+                quantity,
+                date,
+                doc_number,
+                partner,
+                operation,
+                comment
+            ))
+
+            connection.commit()
+            return f"Операция '{'Поступление' if operation == 'in' else 'Отгрузка'}' выполнена. Текущий остаток: {new_stock}"
+
+    except Error as e:
+        if connection and connection.is_connected():
+            connection.rollback()
+        return f"Ошибка при выполнении операции: {e}"
+
+    finally:
+        if connection.is_connected():
+            cursor.close()
+            connection.close()
+
+''' ТЕСТ БЛОК, СНЕСИТЕ ЕСЛИ НУЖНО
+insert_user_category(
+    name="Электроника",
+    description="Товары электронного назначения"
+)
+
+insert_user_data(
+    name="Блок питания 12V",
+    category="Электроника",
+    measure="шт",
+    description="Импульсный блок питания 12V 2A",
+    position="Склад A, ряд 3",
+    minimum_to_warn=10
+)
+
+
+register_movement_by_name("Блок питания 12V",100,"2025-05-15",
+    doc_number="НАКЛ-007",
+    partner="ООО ЭлектроПлюс",
+    operation="in",
+    comment="Допоставка по контракту"
+)
+
+register_movement_by_name(
+    product_name="Блок питания 12V",
+    quantity=30,
+    date="2025-05-17",
+    doc_number="НАКЛ-005",
+    partner="ООО КАК",
+    operation="out",
+    comment="Отправка на склад"
+)
+
+'''
