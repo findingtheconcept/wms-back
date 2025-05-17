@@ -19,9 +19,8 @@ def insert_user_data(name,category, measure, description, position, minimum_to_w
 
             
             if not result:
-                print("Категории не существует!")
-                return
-            # SQL-запрос на вставку данных
+                message = "Категории не существует!"
+                return message
             insert_query = """
             INSERT INTO products (name, category, measure, description, position, minimum_to_warn)
             VALUES (%s, %s, %s, %s, %s, %s)
@@ -30,14 +29,15 @@ def insert_user_data(name,category, measure, description, position, minimum_to_w
             cursor.execute(insert_query, data)
             cursor.execute("UPDATE categories SET num = num + 1 WHERE name = %s", (category,))
             connection.commit()
-            print("Данные успешно добавлены.")
+            message = "Данные успешно добавлены."
 
     except Error as e:
-        print(f"Ошибка при работе с MySQL: {e}")
+        message = "Ошибка при работе с MySQL: " + e
     finally:
         if connection.is_connected():
             cursor.close()
             connection.close()
+        return message
 
 def insert_user_category(name, description): # добавить
     try:

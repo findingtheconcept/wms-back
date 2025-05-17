@@ -35,7 +35,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         items.forEach(item => {
             const option = document.createElement('option');
-            option.value = item[valueField];
+            //option.value = item[valueField];
+            option.value = item[textField];
             option.textContent = item[textField];
             selectElement.appendChild(option);
         });
@@ -178,9 +179,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 e.preventDefault();
                 const formData = new FormData(addProductForm);
                 const productData = Object.fromEntries(formData.entries());
-                // Преобразование в числа, если нужно
-                productData.category_id = parseInt(productData.category_id);
-                productData.min_stock = parseInt(productData.min_stock);
                 // current_stock не задаем при создании, пусть будет 0 по умолчанию или через поступление
                 productData.current_stock = 0; // Установим по умолчанию 0, или можно добавить поле в форму
 

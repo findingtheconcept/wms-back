@@ -3,6 +3,7 @@ import datetime
 import os
 import mysql.connector
 from mysql.connector import Error
+from bd_work import insert_user_data
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24) # Для использования сессий (например, для состояния входа)
@@ -229,68 +230,26 @@ def get_products():
 @app.route('/api/products', methods=['POST'])
 def add_product():
     data = request.json
-    required_fields = ['name', 'category_id', 'unit', 'min_stock']
+    required_fields = ['name', 'category_id', 'unit', 'min_stock', 'description', 'location']
     for field in required_fields:
          if field not in data or (isinstance(data[field], str) and not data[field].strip()):
              return jsonify({"error": f"Поле '{field}' обязательно для заполнения"}), 400
-         if field in ['category_id', 'min_stock'] and not isinstance(data[field], (int, float)):
-              return jsonify({"error": f"Поле '{field}' должно быть числом"}), 400
 
-
-    conn = get_db_connection()
-    if conn is None:
-        return jsonify({"error": "Database connection failed"}), 500
-    cursor = conn.cursor(dictionary=True)
-    try:
-        # Check if category_id is valid
-        cursor.execute("SELECT id FROM categories WHERE id = %s", (data["category_id"],))
-        if not cursor.fetchone():
-             return jsonify({"error": "Указанная категория не найдена"}), 400
-
-        insert_query = """
-            INSERT INTO products (name, category_id, unit, location, min_stock, current_stock, description)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """
-        # Default current_stock to 0 if not provided, location and description to empty string
-        current_stock = int(data.get("current_stock", 0))
-        location = data.get("location", "")
-        description = data.get("description", "")
-
-
-        product_data = (
-            data["name"].strip(),
-            data["category_id"],
-            data["unit"].strip(),
-            location.strip(),
-            int(data["min_stock"]),
-            current_stock,
-            description.strip()
-        )
-        cursor.execute(insert_query, product_data)
-        conn.commit()
-
-        # Fetch the newly created product with category name to return it
-        new_product_id = cursor.lastrowid
-        cursor.execute("""
-            SELECT
-                p.id, p.name, p.category_id, c.name as category_name,
-                p.unit, p.location, p.min_stock, p.current_stock, p.description
-            FROM products p
-            LEFT JOIN categories c ON p.category_id = c.id
-            WHERE p.id = %s
-        """, (new_product_id,))
-        new_product_with_category = cursor.fetchone()
-
-        return jsonify(new_product_with_category), 201
-    except mysql.connector.Error as e:
-        conn.rollback()
-        print(f"Error adding product: {e}")
-        return jsonify({"error": "Error adding product"}), 500
-    except ValueError:
-        return jsonify({"error": "Неверный формат числового поля"}), 400
-    finally:
-        cursor.close()
-        conn.close()
+    # Получаем данные от json объекта, разделяем на парметры
+    insert_name =  data["name"].strip() # имя товара
+    insert_category = data["category_id"].strip() # категория
+    insert_measure = data["unit"].strip() # единицы измерения
+    insert_description = data["description"].strip() # описание (может быть пустым)
+    insert_position = data["location"].strip() # расположение
+    insert_minimum_to_warn = data["min_stock"].strip() # минимальный остаток для уведомления
+    # insert_current_stock = data.get("current_stock", 0) # пока что нигде не хранится
+    
+    # Добавляем в базу данных
+    message = insert_user_data(insert_name, insert_category, insert_measure, insert_description, insert_position, insert_minimum_to_warn)
+    if message == "Данные успешно добавлены.":
+        return jsonify({"id": 201})
+    else:
+        return jsonify({"error": message})
 
 @app.route('/api/products/<int:product_id>', methods=['GET'])
 def get_product(product_id):
