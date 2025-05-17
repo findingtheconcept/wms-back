@@ -175,3 +175,33 @@ def register_product_arrival(productname, quantity, date, invoice_number, provid
         if connection.is_connected():
             cursor.close()
             connection.close()
+
+def register_product_arrival(productname, quantity, date, invoice_number, provider, comment=None):
+    try:
+        connection = mysql.connector.connect(
+            host='localhost',
+            database='warehouse',
+            user='root',
+            password='0000'
+        )
+
+        if connection.is_connected():
+            cursor = connection.cursor()
+
+            # Проверка существования продукта
+            cursor.execute("SELECT * FROM products")
+            data = cursor.fetchall()
+            return data
+
+    except Error as e:
+        print(f"Ошибка при работе с MySQL: {e}")
+    finally:
+        if connection.is_connected():
+            cursor.close()
+            connection.close()
+
+
+
+
+#insert_user_category("Дерево", "Я мудрый дуб")
+#insert_user_data("Доски","Дерево","ед.","Деревянная доска","M52","50")
