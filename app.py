@@ -1,47 +1,41 @@
-from flask import Flask, render_template, request, jsonify, redirect, url_for, session
+from flask import Flask, render_template, request, jsonify, redirect, url_for, session, send_file
 import datetime
 import os
-import mysql.connector
-from mysql.connector import Error
-from bd_work import insert_user_data, register_product_arrival
+import io
+
+from fpdf import FPDF
+from fpdf.fonts import FontFace
+
+import bd_work as db #псевдоним для удобства
 
 app = Flask(__name__)
-app.secret_key = os.urandom(24) # Для использования сессий (например, для состояния входа)
+app.secret_key = os.urandom(24) 
+app.config['STATIC_FOLDER'] = 'static'
 
-# --- Database Connection ---
-def get_db_connection():
-    try:
-        connection = mysql.connector.connect(
-            host='localhost',
-            database='warehouse',
-            user='root',
-            password='0000'
-        )
-        return connection
-    except mysql.connector.Error as e:
-        print(f"Error connecting to MySQL: {e}")
-        return None
+# --- Маршруты для HTML страниц (без изменений, кроме проверки сессии) ---
+def check_auth():
+    """Проверяет, залогинен ли пользователь."""
+    if 'user' not in session:
+        return False
+    return True
 
-# --- Маршруты для HTML страниц ---
 @app.route('/')
 def home_redirect():
-    if 'user' in session:
+    if check_auth():
         return redirect(url_for('product_list_page'))
     return redirect(url_for('login_page'))
 
 @app.route('/login', methods=['GET', 'POST'])
 def login_page():
     if request.method == 'POST':
-        # Временная заглушка для логина (можно заменить на проверку в БД пользователей)
         username = request.form.get('username')
         password = request.form.get('password')
-        # Simple hardcoded user for demonstration
-        if username == "admin" and password == "123":
+        if username == "admin" and password == "123": # Заглушка
             session['user'] = username
             return redirect(url_for('product_list_page'))
         else:
             return render_template('login.html', error="Неверный логин или пароль")
-    if 'user' in session: # Если уже залогинен, редирект на главную
+    if check_auth():
         return redirect(url_for('product_list_page'))
     return render_template('login.html')
 
@@ -52,26 +46,22 @@ def logout():
 
 @app.route('/products')
 def product_list_page():
-    if 'user' not in session:
-        return redirect(url_for('login_page'))
+    if not check_auth(): return redirect(url_for('login_page'))
     return render_template('index.html', username=session['user'])
 
 @app.route('/operations')
 def operations_log_page():
-    if 'user' not in session:
-        return redirect(url_for('login_page'))
+    if not check_auth(): return redirect(url_for('login_page'))
     return render_template('operations_log.html', username=session['user'])
 
 @app.route('/reports')
 def reports_page():
-    if 'user' not in session:
-        return redirect(url_for('login_page'))
+    if not check_auth(): return redirect(url_for('login_page'))
     return render_template('reports.html', username=session['user'])
 
 @app.route('/categories-management')
 def categories_management_page():
-    if 'user' not in session:
-        return redirect(url_for('login_page'))
+    if not check_auth(): return redirect(url_for('login_page'))
     return render_template('categories.html', username=session['user'])
 
 
@@ -79,510 +69,435 @@ def categories_management_page():
 
 # Категории
 @app.route('/api/categories', methods=['GET'])
-def get_categories():
-    conn = get_db_connection()
-    if conn is None:
-        return jsonify({"error": "Database connection failed"}), 500
-    cursor = conn.cursor(dictionary=True)
-    try:
-        cursor.execute("SELECT id, name, description, num FROM categories")
-        categories = cursor.fetchall()
-        return jsonify(categories)
-    except mysql.connector.Error as e:
-        print(f"Error fetching categories: {e}")
-        return jsonify({"error": "Error fetching categories"}), 500
-    finally:
-        cursor.close()
-        conn.close()
+def get_categories_api():
+    if not check_auth(): return jsonify({"error": "Требуется авторизация"}), 401
+    categories, message = db.db_get_all_categories()
+    if "failed" in message or "Ошибка" in message:
+        return jsonify({"error": message}), 500
+    return jsonify(categories)
 
 @app.route('/api/categories', methods=['POST'])
-def add_category():
+def add_category_api():
+    if not check_auth(): return jsonify({"error": "Требуется авторизация"}), 401
     data = request.json
     if not data or 'name' not in data or not data['name'].strip():
         return jsonify({"error": "Название категории не может быть пустым"}), 400
+    
+    name = data['name'].strip()
+    description = data.get("description", "").strip()
 
-    conn = get_db_connection()
-    if conn is None:
-        return jsonify({"error": "Database connection failed"}), 500
-    cursor = conn.cursor(dictionary=True)
-    try:
-        # Check if category already exists
-        cursor.execute("SELECT id FROM categories WHERE name = %s", (data["name"].strip(),))
-        if cursor.fetchone():
-             return jsonify({"error": "Категория с таким названием уже существует"}), 409 # Conflict
-
-        insert_query = "INSERT INTO categories (name, description, num) VALUES (%s, %s, %s)"
-        # Assuming description is optional and num starts at 0
-        description = data.get("description", "")
-        cursor.execute(insert_query, (data["name"].strip(), description, 0))
-        conn.commit()
-        # Get the ID of the newly inserted category
-        new_category_id = cursor.lastrowid
-        # Fetch the newly created category to return it
-        cursor.execute("SELECT id, name, description, num FROM categories WHERE id = %s", (new_category_id,))
-        new_category = cursor.fetchone()
+    new_category, message = db.db_add_category(name, description)
+    if new_category:
         return jsonify(new_category), 201
-    except mysql.connector.Error as e:
-        conn.rollback()
-        print(f"Error adding category: {e}")
-        return jsonify({"error": "Error adding category"}), 500
-    finally:
-        cursor.close()
-        conn.close()
+    elif "уже существует" in message:
+         return jsonify({"error": message}), 409 # Conflict
+    else:
+        return jsonify({"error": message}), 500
 
 @app.route('/api/categories/<int:category_id>', methods=['PUT'])
-def update_category(category_id):
+def update_category_api(category_id):
+    if not check_auth(): return jsonify({"error": "Требуется авторизация"}), 401
     data = request.json
     if not data or 'name' not in data or not data['name'].strip():
         return jsonify({"error": "Название категории не может быть пустым"}), 400
 
-    conn = get_db_connection()
-    if conn is None:
-        return jsonify({"error": "Database connection failed"}), 500
-    cursor = conn.cursor(dictionary=True)
-    try:
-        # Check if category exists
-        cursor.execute("SELECT id, name, description, num FROM categories WHERE id = %s", (category_id,))
-        category = cursor.fetchone()
-        if not category:
-            return jsonify({"error": "Категория не найдена"}), 404
+    name = data['name'].strip()
+    description = data.get("description", "").strip()
 
-        # Check for duplicate name (if changing name)
-        if data['name'].strip() != category['name']:
-             cursor.execute("SELECT id FROM categories WHERE name = %s AND id != %s", (data["name"].strip(), category_id))
-             if cursor.fetchone():
-                return jsonify({"error": "Категория с таким названием уже существует"}), 409 # Conflict
-
-        # Assuming description can also be updated
-        description = data.get("description", category.get("description", ""))
-
-        update_query = "UPDATE categories SET name = %s, description = %s WHERE id = %s"
-        cursor.execute(update_query, (data["name"].strip(), description, category_id))
-        conn.commit()
-
-        # Fetch the updated category to return it
-        cursor.execute("SELECT id, name, description, num FROM categories WHERE id = %s", (category_id,))
-        updated_category = cursor.fetchone()
-
+    updated_category, message = db.db_update_category(category_id, name, description)
+    if updated_category:
         return jsonify(updated_category)
-    except mysql.connector.Error as e:
-        conn.rollback()
-        print(f"Error updating category: {e}")
-        return jsonify({"error": "Error updating category"}), 500
-    finally:
-        cursor.close()
-        conn.close()
+    elif "уже существует" in message:
+        return jsonify({"error": message}), 409
+    elif "не найдена" in message:
+        return jsonify({"error": message}), 404
+    else:
+        return jsonify({"error": message}), 500
 
 @app.route('/api/categories/<int:category_id>', methods=['DELETE'])
-def delete_category(category_id):
-    conn = get_db_connection()
-    if conn is None:
-        return jsonify({"error": "Database connection failed"}), 500
-    cursor = conn.cursor()
-    try:
-        # Check if category exists
-        cursor.execute("SELECT id FROM categories WHERE id = %s", (category_id,))
-        if not cursor.fetchone():
-            return jsonify({"error": "Категория не найдена"}), 404
-
-        # Check for associated products
-        cursor.execute("SELECT COUNT(*) FROM products WHERE category_id = %s", (category_id,))
-        product_count = cursor.fetchone()[0]
-        if product_count > 0:
-            return jsonify({"error": "Нельзя удалить категорию, так как она используется товарами"}), 400
-
-        delete_query = "DELETE FROM categories WHERE id = %s"
-        cursor.execute(delete_query, (category_id,))
-        conn.commit()
-        return jsonify({"message": "Категория удалена"}), 200
-    except mysql.connector.Error as e:
-        conn.rollback()
-        print(f"Error deleting category: {e}")
-        return jsonify({"error": "Error deleting category"}), 500
-    finally:
-        cursor.close()
-        conn.close()
+def delete_category_api(category_id):
+    if not check_auth(): return jsonify({"error": "Требуется авторизация"}), 401
+    success, message = db.db_delete_category(category_id)
+    if success:
+        return jsonify({"message": message}), 200
+    elif "используется товарами" in message:
+        return jsonify({"error": message}), 400
+    elif "не найдена" in message:
+        return jsonify({"error": message}), 404
+    else:
+        return jsonify({"error": message}), 500
 
 # Товары
 @app.route('/api/products', methods=['GET'])
-def get_products():
-    products, message = register_product_arrival()
-    if "Ошибка" in message:
-        return jsonify({"error": "Database connection failed"}), 500
-    else:
-        return jsonify(products)
-    
-
-@app.route('/api/products', methods=['POST'])
-def add_product():
-    data = request.json
-    required_fields = ['name', 'category_id', 'unit', 'min_stock', 'description', 'location']
-    for field in required_fields:
-         if field not in data or (isinstance(data[field], str) and not data[field].strip()):
-             return jsonify({"error": f"Поле '{field}' обязательно для заполнения"}), 400
-
-    # Получаем данные от json объекта, разделяем на парметры
-    insert_name =  data["name"].strip() # имя товара
-    insert_category = data["category_id"].strip() # категория
-    insert_measure = data["unit"].strip() # единицы измерения
-    insert_description = data["description"].strip() # описание (может быть пустым)
-    insert_position = data["location"].strip() # расположение
-    insert_minimum_to_warn = data["min_stock"].strip() # минимальный остаток для уведомления
-    # insert_current_stock = data.get("current_stock", 0) # пока что нигде не хранится
-    
-    # Добавляем в базу данных
-    message = insert_user_data(insert_name, insert_category, insert_measure, insert_description, insert_position, insert_minimum_to_warn)
-    if message == "Данные успешно добавлены.":
-        return jsonify({"id": 201})
-    else:
-        return jsonify({"error": message})
+def get_products_api():
+    if not check_auth(): return jsonify({"error": "Требуется авторизация"}), 401
+    products, message = db.db_get_all_products()
+    if "failed" in message or "Ошибка" in message:
+        return jsonify({"error": message}), 500
+    return jsonify(products)
 
 @app.route('/api/products/<int:product_id>', methods=['GET'])
-def get_product(product_id):
-    conn = get_db_connection()
-    if conn is None:
-        return jsonify({"error": "Database connection failed"}), 500
-    cursor = conn.cursor(dictionary=True)
+def get_product_api(product_id):
+    if not check_auth(): return jsonify({"error": "Требуется авторизация"}), 401
+    product, message = db.db_get_product_by_id(product_id)
+    if product:
+        return jsonify(product)
+    elif "не найден" in message:
+        return jsonify({"error": message}), 404
+    else:
+        return jsonify({"error": message}), 500
+    
+@app.route('/api/products', methods=['POST'])
+def add_product_api():
+    if not check_auth(): return jsonify({"error": "Требуется авторизация"}), 401
+    data = request.json
+    required_fields = ['name', 'category_id', 'unit', 'min_stock']
+    for field in required_fields:
+         if field not in data or \
+           (isinstance(data[field], str) and not data[field].strip()) or \
+           (field == 'category_id' and (data[field] is None or str(data[field]).strip() == "")) or \
+           (field == 'min_stock' and (data[field] is None or str(data[field]).strip() == "")): 
+             return jsonify({"error": f"Поле '{field}' обязательно для заполнения и не может быть пустым"}), 400
     try:
-        cursor.execute("""
-            SELECT
-                p.id, p.name, p.category_id, c.name as category_name,
-                p.unit, p.location, p.min_stock, p.current_stock, p.description
-            FROM products p
-            LEFT JOIN categories c ON p.category_id = c.id
-            WHERE p.id = %s
-        """, (product_id,))
-        product = cursor.fetchone()
-        if product:
-            return jsonify(product)
-        return jsonify({"error": "Товар не найден"}), 404
-    except mysql.connector.Error as e:
-        print(f"Error fetching product: {e}")
-        return jsonify({"error": "Error fetching product"}), 500
-    finally:
-        cursor.close()
-        conn.close()
+        name = data["name"].strip()
+        category_id = int(data["category_id"]) 
+        unit = data["unit"].strip()
+        description = data.get("description", "").strip()
+        location = data.get("location", "").strip()
+        min_stock = int(data["min_stock"])
+        current_stock = int(data.get("current_stock", 0)) # По умолчанию 0 при создании
+    except (ValueError, TypeError) as e:
+        return jsonify({"error": f"Неверный формат данных для одного из полей: {e}"}), 400
+
+    new_product, message = db.db_add_product(name, category_id, unit, description, location, min_stock, current_stock)
+    
+    if new_product:
+        return jsonify(new_product), 201
+    elif "уже существует" in message:
+        return jsonify({"error": message}), 409
+    elif "не найдена" in message:
+        return jsonify({"error": message}), 400
+    else:
+        return jsonify({"error": message}), 500
 
 @app.route('/api/products/<int:product_id>', methods=['PUT'])
-def update_product(product_id):
+def update_product_api(product_id):
+    if not check_auth(): return jsonify({"error": "Требуется авторизация"}), 401
     data = request.json
-    conn = get_db_connection()
-    if conn is None:
-        return jsonify({"error": "Database connection failed"}), 500
-    cursor = conn.cursor(dictionary=True)
+    # Проверка наличия хотя бы одного поля для обновления
+    if not data:
+        return jsonify({"error": "Нет данных для обновления"}), 400
+    
+    # Загружаем текущие данные товара, чтобы частично обновлять
+    current_product, _ = db.db_get_product_by_id(product_id)
+    if not current_product:
+        return jsonify({"error": "Товар не найден"}), 404
+
     try:
-        # Check if product exists
-        cursor.execute("SELECT id, category_id FROM products WHERE id = %s", (product_id,))
-        product = cursor.fetchone()
-        if not product:
-            return jsonify({"error": "Товар не найден"}), 404
-
-        # Check if category_id is valid if provided
-        if 'category_id' in data:
-            cursor.execute("SELECT id FROM categories WHERE id = %s", (data["category_id"],))
-            if not cursor.fetchone():
-                return jsonify({"error": "Указанная категория не найдена"}), 400
-
-        update_fields = []
-        update_values = []
-        # Build update query dynamically based on provided data
-        if 'name' in data:
-            update_fields.append("name = %s")
-            update_values.append(data['name'].strip())
-        if 'category_id' in data:
-            update_fields.append("category_id = %s")
-            update_values.append(data['category_id'])
-        if 'unit' in data:
-            update_fields.append("unit = %s")
-            update_values.append(data['unit'].strip())
-        if 'location' in data:
-            update_fields.append("location = %s")
-            update_values.append(data['location'].strip())
-        if 'min_stock' in data:
-            update_fields.append("min_stock = %s")
-            update_values.append(int(data['min_stock']))
-        if 'current_stock' in data:
-             update_fields.append("current_stock = %s")
-             update_values.append(int(data['current_stock']))
-        if 'description' in data:
-            update_fields.append("description = %s")
-            update_values.append(data['description'].strip())
+        name = data.get("name", current_product["name"]).strip()
+        category_id = int(data.get("category_id", current_product["category_id"]))
+        unit = data.get("unit", current_product["unit"]).strip()
+        description = data.get("description", current_product["description"]).strip()
+        location = data.get("location", current_product["location"]).strip()
+        min_stock = int(data.get("min_stock", current_product["min_stock"]))
+    except (ValueError, TypeError) as e:
+        return jsonify({"error": f"Неверный формат данных для одного из полей: {e}"}), 400
+    
+    if not name or not unit: 
+         return jsonify({"error": "Поля 'name' и 'unit' не могут быть пустыми"}), 400
 
 
-        if not update_fields:
-            return jsonify({"message": "Нет данных для обновления"}), 200
-
-        update_query = f"UPDATE products SET {', '.join(update_fields)} WHERE id = %s"
-        update_values.append(product_id)
-
-        cursor.execute(update_query, tuple(update_values))
-        conn.commit()
-
-        # Fetch the updated product with category name to return it
-        cursor.execute("""
-            SELECT
-                p.id, p.name, p.category_id, c.name as category_name,
-                p.unit, p.location, p.min_stock, p.current_stock, p.description
-            FROM products p
-            LEFT JOIN categories c ON p.category_id = c.id
-            WHERE p.id = %s
-        """, (product_id,))
-        updated_product = cursor.fetchone()
-
+    updated_product, message = db.db_update_product(product_id, name, category_id, unit, description, location, min_stock)
+    
+    if updated_product:
         return jsonify(updated_product)
-    except mysql.connector.Error as e:
-        conn.rollback()
-        print(f"Error updating product: {e}")
-        return jsonify({"error": "Error updating product"}), 500
-    except ValueError:
-         return jsonify({"error": "Неверный формат числового поля"}), 400
-    finally:
-        cursor.close()
-        conn.close()
+    elif "уже существует" in message: 
+        return jsonify({"error": message}), 409
+    elif "не найдена" in message: 
+        return jsonify({"error": message}), 404 if "Товар" in message else 400
+    else:
+        return jsonify({"error": message}), 500
+
 
 @app.route('/api/products/<int:product_id>', methods=['DELETE'])
-def delete_product(product_id):
-    conn = get_db_connection()
-    if conn is None:
-        return jsonify({"error": "Database connection failed"}), 500
-    cursor = conn.cursor()
-    try:
-        # Check if product exists
-        cursor.execute("SELECT id FROM products WHERE id = %s", (product_id,))
-        if not cursor.fetchone():
-            return jsonify({"error": "Товар не найден"}), 404
+def delete_product_api(product_id):
+    if not check_auth(): return jsonify({"error": "Требуется авторизация"}), 401
+    success, message = db.db_delete_product(product_id)
+    if success:
+        return jsonify({"message": message}), 200
+    elif "не найден" in message:
+        return jsonify({"error": message}), 404
+    else:
+        return jsonify({"error": message}), 500
 
-        # Optional: Check for related operations before deleting (depends on desired behavior)
-        # cursor.execute("SELECT COUNT(*) FROM operations WHERE product_id = %s", (product_id,))
-        # operation_count = cursor.fetchone()[0]
-        # if operation_count > 0:
-        #     return jsonify({"error": "Нельзя удалить товар, так как есть связанные операции"}), 400
-
-
-        delete_query = "DELETE FROM products WHERE id = %s"
-        cursor.execute(delete_query, (product_id,))
-        conn.commit()
-        return jsonify({"message": "Товар удален"}), 200
-    except mysql.connector.Error as e:
-        conn.rollback()
-        print(f"Error deleting product: {e}")
-        return jsonify({"error": "Error deleting product"}), 500
-    finally:
-        cursor.close()
-        conn.close()
 
 # Операции
 @app.route('/api/operations', methods=['GET'])
-def get_operations():
-    conn = get_db_connection()
-    if conn is None:
-        return jsonify({"error": "Database connection failed"}), 500
-    cursor = conn.cursor(dictionary=True)
-    try:
-        # Fetch operations with product name, ordered by date
-        cursor.execute("""
-            SELECT
-                o.id, o.date, o.type, o.product_id, p.name as product_name,
-                o.quantity, o.invoice_number, o.party, o.comment
-            FROM operations o
-            LEFT JOIN products p ON o.product_id = p.id
-            ORDER BY o.date DESC
-        """)
-        operations = cursor.fetchall()
-        return jsonify(operations)
-    except mysql.connector.Error as e:
-        print(f"Error fetching operations: {e}")
-        return jsonify({"error": "Error fetching operations"}), 500
-    finally:
-        cursor.close()
-        conn.close()
+def get_operations_api():
+    if not check_auth(): return jsonify({"error": "Требуется авторизация"}), 401
+    operations, message = db.db_get_all_operations() 
+    if "failed" in message or "Ошибка" in message:
+        return jsonify({"error": message}), 500
+    return jsonify(operations)
 
 
 @app.route('/api/operations/register', methods=['POST'])
-def register_operation():
+def register_operation_api():
+    if not check_auth(): return jsonify({"error": "Требуется авторизация"}), 401
     data = request.json
     required_fields = ['type', 'product_id', 'quantity']
     for field in required_fields:
-         if field not in data or (isinstance(data[field], str) and not data[field].strip()):
+         if field not in data or (isinstance(data[field], str) and not str(data[field]).strip()):
              return jsonify({"error": f"Поле '{field}' обязательно для заполнения"}), 400
 
-    op_type = data.get('type') # "Поступление" or "Отгрузка"
-    product_id = data.get('product_id')
-    quantity = int(data.get('quantity'))
+    op_type = data.get('type')
+    product_id_str = data.get('product_id')
+    quantity_str = data.get('quantity')
 
     if op_type not in ["Поступление", "Отгрузка"]:
          return jsonify({"error": "Неверный тип операции. Должен быть 'Поступление' или 'Отгрузка'"}), 400
 
-    conn = get_db_connection()
-    if conn is None:
-        return jsonify({"error": "Database connection failed"}), 500
-    cursor = conn.cursor(dictionary=True)
     try:
-        # Check if product exists and get current stock
-        cursor.execute("SELECT id, name, current_stock FROM products WHERE id = %s", (product_id,))
-        product = cursor.fetchone()
-        if not product:
-            return jsonify({"error": "Товар не найден"}), 404
+        product_id = int(product_id_str)
+        quantity = int(quantity_str)
+        if quantity <= 0:
+            return jsonify({"error": "Количество товара должно быть положительным числом"}), 400
+    except (ValueError, TypeError):
+         return jsonify({"error": "ID товара и количество должны быть числами"}), 400
 
-        if op_type == "Отгрузка" and product["current_stock"] < quantity:
-            return jsonify({"error": f"Недостаточно товара '{product['name']}' на складе. В наличии: {product['current_stock']}"}), 400
+    op_date_str = data.get("date") 
+    invoice_number = data.get("invoice_number", "")
+    party = data.get("party", "") # Поставщик или получатель
+    comment = data.get("comment", "")
 
-        # Insert operation
-        insert_operation_query = """
-            INSERT INTO operations (date, type, product_id, quantity, invoice_number, party, comment)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """
-        # Use provided date or current time
-        op_date = data.get("date", datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-        invoice_number = data.get("invoice_number", "")
-        party = data.get("party", "")
-        comment = data.get("comment", "")
+    new_operation, message = db.db_register_operation(
+        op_type, product_id, quantity, op_date_str, invoice_number, party, comment
+    )
 
-        operation_data = (
-            op_date,
-            op_type,
-            product_id,
-            quantity,
-            invoice_number.strip(),
-            party.strip(),
-            comment.strip()
-        )
-        cursor.execute(insert_operation_query, operation_data)
+    if new_operation:
+        return jsonify(new_operation), 201
+    elif "Недостаточно товара" in message:
+        return jsonify({"error": message}), 400
+    elif "Товар не найден" in message:
+        return jsonify({"error": message}), 404
+    elif "Неверный формат даты" in message:
+        return jsonify({"error": message}), 400
+    else:
+        return jsonify({"error": message}), 500
+    
 
-        # Update product stock
-        new_stock = product["current_stock"] + quantity if op_type == "Поступление" else product["current_stock"] - quantity
-        update_stock_query = "UPDATE products SET current_stock = %s WHERE id = %s"
-        cursor.execute(update_stock_query, (new_stock, product_id))
+@app.route('/api/operations/clear', methods=['DELETE'])
+def clear_operations_log_api():
+    if not check_auth(): return jsonify({"error": "Требуется авторизация"}), 401
+    
+    # Дополнительная проверка, например, роли администратора
+    # if session.get('role') != 'admin':
+    #     return jsonify({"error": "Недостаточно прав для выполнения этой операции"}), 403
 
-        conn.commit()
-
-        # Fetch the newly created operation with product name to return it
-        new_operation_id = cursor.lastrowid
-        cursor.execute("""
-            SELECT
-                o.id, o.date, o.type, o.product_id, p.name as product_name,
-                o.quantity, o.invoice_number, o.party, o.comment
-            FROM operations o
-            LEFT JOIN products p ON o.product_id = p.id
-            WHERE o.id = %s
-        """, (new_operation_id,))
-        new_operation_with_details = cursor.fetchone()
-
-
-        return jsonify(new_operation_with_details), 201
-    except mysql.connector.Error as e:
-        conn.rollback()
-        print(f"Error registering operation: {e}")
-        return jsonify({"error": "Error registering operation"}), 500
-    except ValueError:
-         return jsonify({"error": "Количество товара должно быть числом"}), 400
-    finally:
-        cursor.close()
-        conn.close()
+    success, message = db.db_clear_operations_log()
+    if success:
+        return jsonify({"message": message}), 200
+    else:
+        return jsonify({"error": message}), 500
 
 # Отчеты
+def _fetch_report_data(report_type_param, request_args):
+    """Вспомогательная функция для получения данных отчета."""
+    data_list = []
+    columns_list = []
+    report_title_str = ""
+    message_str = ""
+    status_code_int = 500
+
+    if report_type_param == "current_stock_all":
+        data_list, columns_list, message_str = db.db_report_current_stock_all()
+        report_title_str = "Текущие остатки всех товаров"
+        status_code_int = 200
+    elif report_type_param == "low_stock":
+        data_list, columns_list, message_str = db.db_report_low_stock()
+        report_title_str = "Товары с остатком ниже минимального"
+        status_code_int = 200
+    elif report_type_param == "operations_period":
+        start_date_str = request_args.get('start_date')
+        end_date_str = request_args.get('end_date')
+        if not start_date_str or not end_date_str:
+            return None, None, None, "Необходимо указать начальную и конечную дату", 400
+        data_list, columns_list, message_str = db.db_report_operations_period(start_date_str, end_date_str)
+        if "Неверный формат даты" in message_str:
+            return None, None, None, message_str, 400
+        report_title_str = f"Операции за период с {start_date_str} по {end_date_str}"
+        status_code_int = 200
+    elif report_type_param == "product_movement_period":
+        product_id_str = request_args.get('product_id')
+        start_date_str = request_args.get('start_date')
+        end_date_str = request_args.get('end_date')
+        if not product_id_str or not start_date_str or not end_date_str:
+            return None, None, None, "Необходимо указать товар, начальную и конечную дату", 400
+        try:
+            product_id = int(product_id_str)
+        except ValueError:
+            return None, None, None, "ID товара должен быть числом", 400
+        
+        data_list, columns_list, product_name, message_str = db.db_report_product_movement_period(product_id, start_date_str, end_date_str)
+        if "Неверный формат даты" in message_str:
+            return None, None, None, message_str, 400
+        if "Товар не найден" in message_str:
+            return None, None, None, message_str, 404
+        report_title_str = f"Движение товара '{product_name}' за период с {start_date_str} по {end_date_str}"
+        status_code_int = 200
+    else:
+        return None, None, None, "Тип отчета не найден или не реализован", 404
+
+    if "Ошибка отчета" in message_str or "failed" in message_str : # Проверяем ошибки из DB функций
+         return data_list, columns_list, report_title_str, message_str, 500
+
+    return data_list, columns_list, report_title_str, message_str, status_code_int
+
+
 @app.route('/api/reports/<report_type>', methods=['GET'])
-def get_report(report_type):
-    conn = get_db_connection()
-    if conn is None:
-        return jsonify({"error": "Database connection failed"}), 500
-    cursor = conn.cursor(dictionary=True)
+def get_report_api(report_type):
+    if not check_auth(): return jsonify({"error": "Требуется авторизация"}), 401
+    
+    data_list, columns_list, report_title_str, message_str, status_code_int = _fetch_report_data(report_type, request.args)
+
+    if status_code_int != 200:
+        return jsonify({"error": message_str}), status_code_int
+    
+    return jsonify({"title": report_title_str, "data": data_list, "columns": columns_list, "message": message_str}), 200
+
+@app.route('/api/reports/<report_type>/pdf', methods=['GET'])
+def get_report_pdf_api(report_type):
+    if not check_auth(): return jsonify({"error": "Требуется авторизация"}), 401
+
+    data_list, columns_list, report_title_str, message_str, status_code_int = _fetch_report_data(report_type, request.args)
+
+    if status_code_int != 200:
+        return jsonify({"error": message_str}), status_code_int
+
+    if not data_list: # Проверяем, есть ли вообще данные для отчета
+        if status_code_int == 200:
+            return jsonify({"error": "Нет данных для формирования PDF отчета (отчет пуст)."}), 404
+        else:
+             return jsonify({"error": message_str}), status_code_int
+
+
+    pdf = ReportPDF(orientation="L", unit="mm", format="A4")
+    pdf.report_title = report_title_str
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+    pdf.alias_nb_pages() 
+
+    if data_list and not columns_list:
+        columns_list = list(data_list[0].keys()) if data_list else []
+        if not columns_list: # Если все еще нет колонок
+             return jsonify({"error": "Не удалось определить колонки для PDF отчета."}), 500
+
+
+    pdf.table_header(columns_list)
+    pdf.table_body(data_list, columns_list)
+
+    pdf_buffer = io.BytesIO()
     try:
-        if report_type == "current_stock_all":
-            cursor.execute("""
-                SELECT
-                    p.name as Наименование, c.name as Категория, p.unit as `Ед. изм.`,
-                    p.location as `Место хранения`, p.min_stock as `Мин. остаток`,
-                    p.current_stock as `Текущий остаток`
-                FROM products p
-                LEFT JOIN categories c ON p.category_id = c.id
-            """)
-            data = cursor.fetchall()
-            columns = list(data[0].keys()) if data else []
-            return jsonify({"title": "Текущие остатки всех товаров", "data": data, "columns": columns})
+        # pdf.output() с объектом BytesIO в качестве первого аргумента
+        # запишет бинарные данные PDF напрямую в этот буфер.
+        pdf.output(pdf_buffer) 
+    except Exception as e_pdf_output:
+        print(f"Ошибка при выводе PDF в BytesIO: {e_pdf_output}")
+        return jsonify({"error": f"Ошибка сервера при генерации PDF: {e_pdf_output}"}), 500
+    
+    pdf_buffer.seek(0)
 
-        elif report_type == "low_stock":
-            cursor.execute("""
-                SELECT
-                    p.name as Наименование, c.name as Категория,
-                    p.min_stock as `Мин. остаток`, p.current_stock as `Текущий остаток`,
-                    (p.min_stock - p.current_stock) as `Требуется закупка`
-                FROM products p
-                LEFT JOIN categories c ON p.category_id = c.id
-                WHERE p.current_stock < p.min_stock
-            """)
-            data = cursor.fetchall()
-            columns = list(data[0].keys()) if data else []
-            return jsonify({"title": "Товары с остатком ниже минимального", "data": data, "columns": columns})
+    safe_title = "".join([c if c.isalnum() else "_" for c in report_title_str])
+    if not safe_title:
+        safe_title = "report"
 
-        elif report_type == "operations_period":
-            start_date_str = request.args.get('start_date')
-            end_date_str = request.args.get('end_date')
+    return send_file(
+        pdf_buffer,
+        mimetype='application/pdf',
+        as_attachment=True,
+        download_name=f'{safe_title}_{report_type}.pdf'
+    )
 
-            if not start_date_str or not end_date_str:
-                 return jsonify({"error": "Необходимо указать начальную и конечную дату"}), 400
-
+class ReportPDF(FPDF):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.cyrillic_font_loaded = False
+        try:
+            self.add_font("DejaVu", "", "DejaVuSansCondensed.ttf", uni=True)
+            self.add_font("DejaVu", "B", "DejaVuSansCondensed-Bold.ttf", uni=True)
+            self.set_font("DejaVu", "", 10) # Устанавливаем шрифт по умолчанию сразу
+            self.current_font_family = "DejaVu" # Сохраняем имя семейства
+            self.cyrillic_font_loaded = True
+            print("Шрифт DejaVu успешно загружен.")
+        except RuntimeError as e:
+            print(f"Ошибка добавления шрифта DejaVu: {e}. Попытка использовать Arial.")
             try:
-                start_date = datetime.datetime.strptime(start_date_str, "%Y-%m-%d").strftime("%Y-%m-%d %H:%M:%S")
-                end_date = datetime.datetime.strptime(end_date_str, "%Y-%m-%d").replace(hour=23, minute=59, second=59).strftime("%Y-%m-%d %H:%M:%S")
-            except ValueError:
-                 return jsonify({"error": "Неверный формат даты. Используйте ГГГГ-ММ-ДД."}), 400
+                 self.add_font("Arial", "", "arial.ttf", uni=True) 
+                 self.add_font("Arial", "B", "arialbd.ttf", uni=True)
+                 self.set_font("Arial", "", 10)
+                 self.current_font_family = "Arial"
+                 self.cyrillic_font_loaded = True 
+                 print("Шрифт Arial успешно загружен.")
+            except RuntimeError as e_arial:
+                print(f"Ошибка добавления шрифта Arial: {e_arial}. PDF может некорректно отображать кириллицу.")
+                self.set_font("Helvetica", "", 10)
+                self.current_font_family = "Helvetica"
+                self.cyrillic_font_loaded = False
+                print("Используется стандартный шрифт Helvetica. Кириллица не будет отображаться корректно.")
 
-            cursor.execute("""
-                SELECT
-                    o.date as Дата, o.type as Тип, p.name as Товар,
-                    o.quantity as Количество, o.invoice_number as `Номер накладной`,
-                    o.party as `Поставщик/Получатель`, o.comment as Комментарий
-                FROM operations o
-                LEFT JOIN products p ON o.product_id = p.id
-                WHERE o.date BETWEEN %s AND %s
-                ORDER BY o.date DESC
-            """, (start_date, end_date))
-            data = cursor.fetchall()
-            columns = list(data[0].keys()) if data else []
-            return jsonify({"title": f"Операции за период с {start_date_str} по {end_date_str}", "data": data, "columns": columns})
+    def header(self):
+        if hasattr(self, 'report_title') and self.report_title:
+            self.set_font(self.current_font_family, "B", 14) # Используем сохраненное семейство
+            self.cell(0, 10, self.report_title, 0, 1, "C")
+            self.ln(5)
 
-        elif report_type == "product_movement_period":
-            product_id = request.args.get('product_id', type=int)
-            start_date_str = request.args.get('start_date')
-            end_date_str = request.args.get('end_date')
+    def footer(self):
+        self.set_y(-15)
+        self.set_font(self.current_font_family, "", 8) 
+        self.cell(0, 10, f"Страница {self.page_no()}/{{nb}}", 0, 0, "C")
 
-            if not product_id or not start_date_str or not end_date_str:
-                 return jsonify({"error": "Необходимо указать товар, начальную и конечную дату"}), 400
+    def table_header(self, columns):
+        self.set_font(self.current_font_family, "B", 9) 
+        self.set_fill_color(230, 230, 230)
+        effective_page_width = self.w - 2 * self.l_margin
+        num_columns = len(columns)
+        col_width = effective_page_width / num_columns if num_columns > 0 else effective_page_width
 
-            try:
-                start_date = datetime.datetime.strptime(start_date_str, "%Y-%m-%d").strftime("%Y-%m-%d %H:%M:%S")
-                end_date = datetime.datetime.strptime(end_date_str, "%Y-%m-%d").replace(hour=23, minute=59, second=59).strftime("%Y-%m-%d %H:%M:%S")
-            except ValueError:
-                 return jsonify({"error": "Неверный формат даты. Используйте ГГГГ-ММ-ДД."}), 400
-
-            # Check if product exists
-            cursor.execute("SELECT name FROM products WHERE id = %s", (product_id,))
-            product = cursor.fetchone()
-            if not product:
-                return jsonify({"error": "Товар не найден"}), 404
-
-            cursor.execute("""
-                SELECT
-                    o.date as Дата, o.type as Тип, o.quantity as Количество,
-                    o.invoice_number as `Номер накладной`, o.party as `Поставщик/Получатель`, o.comment as Комментарий
-                FROM operations o
-                WHERE o.product_id = %s AND o.date BETWEEN %s AND %s
-                ORDER BY o.date DESC
-            """, (product_id, start_date, end_date))
-            data = cursor.fetchall()
-            columns = list(data[0].keys()) if data else []
-            return jsonify({"title": f"Движение товара '{product['name']}' за период с {start_date_str} по {end_date_str}", "data": data, "columns": columns})
+        for col_name in columns:
+            self.multi_cell(col_width, 7, str(col_name), border=1, align="C", fill=True, new_x="RIGHT", new_y="TOP", max_line_height=7)
+        self.ln()
 
 
-        return jsonify({"error": "Тип отчета не найден или не реализован"}), 404
-    except mysql.connector.Error as e:
-        print(f"Error generating report: {e}")
-        return jsonify({"error": "Error generating report"}), 500
-    finally:
-        cursor.close()
-        conn.close()
+    def table_body(self, data, columns_data_keys):
+        self.set_font(self.current_font_family, "", 8)
+        effective_page_width = self.w - 2 * self.l_margin
+        num_columns = len(columns_data_keys)
+        col_width = effective_page_width / num_columns if num_columns > 0 else effective_page_width
+
+        for row_dict in data:
+            for data_key in columns_data_keys: # data_key это ключ из словаря row_dict
+                cell_value_raw = row_dict.get(data_key) # Получаем значение по ключу
+                
+                cell_value_str = str(cell_value_raw) if cell_value_raw is not None else ''
+
+                if isinstance(data_key, str) and "дата" in data_key.lower():
+                    if isinstance(cell_value_raw, datetime.datetime):
+                        cell_value_str = cell_value_raw.strftime('%d.%m.%Y %H:%M')
+                    elif isinstance(cell_value_raw, str) and 'T' in cell_value_raw:
+                        try:
+                            dt_obj = datetime.datetime.fromisoformat(cell_value_raw.split('.')[0].replace('Z', '').replace(' ', 'T'))
+                            cell_value_str = dt_obj.strftime('%d.%m.%Y %H:%M')
+                        except ValueError:
+                            try:
+                                dt_obj_fallback = datetime.datetime.strptime(cell_value_raw, '%Y-%m-%d %H:%M:%S')
+                                cell_value_str = dt_obj_fallback.strftime('%d.%m.%Y %H:%M')
+                            except ValueError:
+                                pass
+                
+                self.multi_cell(col_width, 6, cell_value_str, border=1, align="L", new_x="RIGHT", new_y="TOP", max_line_height=6)
+            self.ln()
 
 
 if __name__ == '__main__':
+    #debug=True только для разработки!
     app.run(debug=True)

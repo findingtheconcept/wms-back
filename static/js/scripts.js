@@ -1,52 +1,73 @@
 document.addEventListener('DOMContentLoaded', () => {
     const currentPath = window.location.pathname;
+    const apiBaseUrl = '/api';
+    let allProductsCache = []; // Кэш для товаров на странице продуктов
+    let allCategoriesCache = []; // Кэш для категорий
 
     // --- ОБЩИЕ ФУНКЦИИ ---
-    const apiBaseUrl = '/api';
 
     async function fetchData(url, options = {}) {
         try {
             const response = await fetch(url, options);
+            if (response.status === 204) return { success: true, status: 204, message: "Действие выполнено успешно (нет содержимого)." };
+
+            const responseData = await response.json().catch(() => {
+                if (response.ok) return { success: false, error: `Неожиданный ответ от сервера (статус ${response.status}).`, status: response.status };
+                return { success: false, error: `Ошибка HTTP: ${response.status}. Не удалось получить детали ошибки.`, status: response.status };
+            });
+
             if (!response.ok) {
-                const errorData = await response.json().catch(() => ({ error: `Ошибка HTTP: ${response.status}` }));
-                console.error('Ошибка API:', errorData);
-                alert(`Ошибка: ${errorData.error || response.statusText}`);
-                return null;
+                console.error('Ошибка API:', responseData.error || `Ошибка HTTP: ${response.status}`);
+                showToast(`Ошибка: ${responseData.error || response.statusText || 'Неизвестная ошибка'}`, 'danger');
+                return { success: false, error: responseData.error || `Ошибка HTTP: ${response.status}`, status: response.status, data: responseData };
             }
-            if (response.status === 204) return true; // No content
-            return await response.json();
+            return { success: true, status: response.status, data: responseData };
         } catch (error) {
             console.error('Сетевая ошибка или ошибка парсинга JSON:', error);
-            alert('Произошла сетевая ошибка. Пожалуйста, проверьте ваше соединение.');
-            return null;
+            showToast('Произошла сетевая ошибка. Пожалуйста, проверьте ваше соединение или обратитесь к администратору.', 'danger');
+            return { success: false, error: 'Сетевая ошибка или ошибка парсинга JSON.', status: 0 };
         }
     }
 
-    function populateSelect(selectElement, items, valueField, textField, placeholder) {
+
+    function populateSelect(selectElement, items, valueField, textField, placeholder, defaultSelectedValue = "") {
         if (!selectElement) return;
-        selectElement.innerHTML = ''; // Очистить существующие опции
+        const currentValue = selectElement.value;
+        selectElement.innerHTML = '';
+
         if (placeholder) {
             const placeholderOption = document.createElement('option');
             placeholderOption.value = "";
             placeholderOption.textContent = placeholder;
             placeholderOption.disabled = true;
-            placeholderOption.selected = true;
             selectElement.appendChild(placeholderOption);
         }
+
         items.forEach(item => {
             const option = document.createElement('option');
-            //option.value = item[valueField];
-            option.value = item[textField];
+            option.value = item[valueField];
             option.textContent = item[textField];
             selectElement.appendChild(option);
         });
+
+
+        if (defaultSelectedValue !== "" && selectElement.querySelector(`option[value="${defaultSelectedValue}"]`)) {
+            selectElement.value = defaultSelectedValue;
+        } else if (currentValue && selectElement.querySelector(`option[value="${currentValue}"]`)) {
+            selectElement.value = currentValue;
+        } else if (placeholder) {
+            selectElement.value = ""; 
+        }
     }
+
 
     function showToast(message, type = 'success') {
         const toastContainer = document.getElementById('toastContainer') || createToastContainer();
         const toastId = 'toast-' + Date.now();
+        const toastBgClass = type === 'success' ? 'bg-success' : (type === 'danger' ? 'bg-danger' : 'bg-primary');
+
         const toastHTML = `
-            <div class="toast align-items-center text-bg-${type === 'success' ? 'primary' : 'danger'} border-0" role="alert" aria-live="assertive" aria-atomic="true" id="${toastId}" data-bs-delay="3000">
+            <div class="toast align-items-center text-white ${toastBgClass} border-0" role="alert" aria-live="assertive" aria-atomic="true" id="${toastId}" data-bs-delay="5000">
                 <div class="d-flex">
                     <div class="toast-body">
                         ${message}
@@ -57,59 +78,63 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
         toastContainer.insertAdjacentHTML('beforeend', toastHTML);
         const toastElement = document.getElementById(toastId);
-        const toast = new bootstrap.Toast(toastElement);
-        toast.show();
-        toastElement.addEventListener('hidden.bs.toast', () => toastElement.remove());
+        if (toastElement) {
+            const toast = new bootstrap.Toast(toastElement);
+            toast.show();
+            toastElement.addEventListener('hidden.bs.toast', () => toastElement.remove());
+        }
     }
 
     function createToastContainer() {
         const container = document.createElement('div');
         container.id = 'toastContainer';
         container.className = 'toast-container position-fixed top-0 end-0 p-3';
-        container.style.zIndex = '1090'; // Выше модальных окон Bootstrap
+        container.style.zIndex = '1100';
         document.body.appendChild(container);
         return container;
     }
 
+    function formatDateForDateTimeLocal(dateString) {
+        if (!dateString) return '';
+        const date = new Date(dateString);
+        // Проверка на валидность даты
+        if (isNaN(date.getTime())) return '';
+
+        const year = date.getFullYear();
+        const month = (date.getMonth() + 1).toString().padStart(2, '0');
+        const day = date.getDate().toString().padStart(2, '0');
+        const hours = date.getHours().toString().padStart(2, '0');
+        const minutes = date.getMinutes().toString().padStart(2, '0');
+        return `${year}-${month}-${day}T${hours}:${minutes}`;
+    }
+
 
     // --- ЛОГИКА ДЛЯ СТРАНИЦЫ ВХОДА (login.html) ---
-    if (currentPath.includes('/login')) {
-        const loginForm = document.querySelector('form'); // Предполагаем, что на странице одна форма
-        if (loginForm) {
-            loginForm.addEventListener('submit', async (event) => {
-                // Предотвращаем стандартную отправку формы, так как Flask сам обработает
-                // event.preventDefault();
-                // const formData = new FormData(loginForm);
-                // const response = await fetch('/login', { // Отправляем на Flask маршрут
-                //     method: 'POST',
-                //     body: formData
-                // });
-                // if (response.ok) {
-                //     const result = await response.json().catch(() => ({})); // или response.text() если редирект
-                //     if (result.success || response.redirected) {
-                //         window.location.href = result.redirect_url || '/products';
-                //     } else {
-                //         alert(result.error || 'Ошибка входа. Попробуйте снова.');
-                //     }
-                // } else {
-                //     alert('Ошибка сервера при попытке входа.');
-                // }
-                // Закомментировано, т.к. Flask будет обрабатывать POST и делать редирект или рендерить с ошибкой.
-                // JS здесь не нужен для отправки, если форма стандартная.
-            });
+
+    // --- ОБЩАЯ ЗАГРУЗКА КАТЕГОРИЙ ---
+    async function loadAndCacheCategories() {
+        if (allCategoriesCache.length === 0) {
+            const result = await fetchData(`${apiBaseUrl}/categories`);
+            if (result.success && Array.isArray(result.data)) {
+                allCategoriesCache = result.data;
+            } else {
+                showToast(result.error || 'Не удалось загрузить категории.', 'danger');
+                allCategoriesCache = []; // Убедимся, что это массив
+            }
         }
+        return allCategoriesCache;
     }
 
 
     // --- ЛОГИКА ДЛЯ СТРАНИЦЫ СПИСКА ТОВАРОВ (index.html) ---
     if (currentPath.includes('/products') || currentPath === '/') {
-        const productTableBody = document.querySelector('#productTableBody'); // Добавьте id="productTableBody" к tbody в index.html
+        const productTableBody = document.getElementById('productTableBody');
         const addProductForm = document.getElementById('addProductForm');
         const editProductForm = document.getElementById('editProductForm');
         const deleteProductModalElement = document.getElementById('deleteProductModal');
-        const deleteProductConfirmButton = deleteProductModalElement ? deleteProductModalElement.querySelector('.btn-danger') : null;
+        const deleteProductConfirmButton = document.getElementById('confirmDeleteProduct');
         let currentProductIdToDelete = null;
-        let currentProductToEdit = null;
+        let currentProductToEditId = null;
 
         const addProductCategorySelect = document.getElementById('addProductCategory');
         const editProductCategorySelect = document.getElementById('editProductCategory');
@@ -120,307 +145,292 @@ document.addEventListener('DOMContentLoaded', () => {
         const incomingProductSelect = document.getElementById('incomingProduct');
         const outgoingProductSelect = document.getElementById('outgoingProduct');
 
-
-        async function loadCategoriesForForms() {
-            const categories = await fetchData(`${apiBaseUrl}/categories`);
-            if (categories) {
-                populateSelect(addProductCategorySelect, categories, 'id', 'name', 'Выберите категорию...');
-                populateSelect(editProductCategorySelect, categories, 'id', 'name', 'Выберите категорию...');
-                populateSelect(filterCategorySelect, [{id: "", name: "Все категории"}, ...categories], 'id', 'name');
-                populateSelect(incomingProductSelect, [], 'id', 'name', 'Сначала загрузите товары...'); // Товары будут позже
-                populateSelect(outgoingProductSelect, [], 'id', 'name', 'Сначала загрузите товары...');
-            }
+        async function loadCategoriesForProductForms() {
+            const categories = await loadAndCacheCategories();
+            populateSelect(addProductCategorySelect, categories, 'id', 'name', 'Выберите категорию...');
+            populateSelect(editProductCategorySelect, categories, 'id', 'name', 'Выберите категорию...'); 
+            const filterCategories = [{ id: "", name: "Все категории" }, ...categories];
+            populateSelect(filterCategorySelect, filterCategories, 'id', 'name', ''); 
+            filterCategorySelect.value = "";
         }
 
-        async function loadProductsForOperationForms(products) {
-             if (products) {
-                populateSelect(incomingProductSelect, products, 'id', 'name', 'Выберите товар...');
-                populateSelect(outgoingProductSelect, products, 'id', 'name', 'Выберите товар...');
-            }
+        function populateProductSelectsForOperations(products) {
+            populateSelect(incomingProductSelect, products, 'id', 'name', 'Выберите товар...');
+            populateSelect(outgoingProductSelect, products, 'id', 'name', 'Выберите товар...');
         }
 
-
-        function renderProducts(products) {
+        function renderProducts(productsToRender) {
             if (!productTableBody) return;
-            productTableBody.innerHTML = ''; // Очищаем таблицу
-            if (!products || products.length === 0) {
+            productTableBody.innerHTML = '';
+            if (!productsToRender || productsToRender.length === 0) {
                 productTableBody.innerHTML = '<tr><td colspan="7" class="text-center">Товары не найдены.</td></tr>';
                 return;
             }
-            products.forEach(product => {
+            productsToRender.forEach(product => {
                 const row = productTableBody.insertRow();
                 row.dataset.productId = product.id;
                 row.innerHTML = `
-                    <td>${product.name}</td>
-                    <td>${product.category}</td>
-                    <td>${product.measure}</td>
-                    <td>${product.position}</td>
-                    <td>${product.minimum_to_warn}</td>
-                    <td>${product.stock} ${product.stock < product.minimum_to_warn ? '<i class="bi bi-exclamation-triangle-fill text-danger ms-1" title="Остаток ниже минимума"></i>' : ''}</td>
+                    <td>${product.name || 'N/A'}</td>
+                    <td>${product.category_name || 'N/A'}</td>
+                    <td>${product.unit || 'N/A'}</td>
+                    <td>${product.location || '-'}</td>
+                    <td>${product.min_stock !== undefined ? product.min_stock : 'N/A'}</td>
+                    <td>${product.current_stock !== undefined ? product.current_stock : 'N/A'} ${product.current_stock < product.min_stock ? '<i class="bi bi-exclamation-triangle-fill text-danger ms-1" title="Остаток ниже минимума"></i>' : ''}</td>
                     <td class="action-icons">
-                        <a href="#" class="edit-product" title="Редактировать" data-bs-toggle="modal" data-bs-target="#editProductModal"><i class="bi bi-pencil-square"></i></a>
-                        <a href="#" class="delete-product" title="Удалить" data-bs-toggle="modal" data-bs-target="#deleteProductModal"><i class="bi bi-trash3-fill"></i></a>
+                        <a href="#" class="edit-product" title="Редактировать" data-bs-toggle="modal" data-bs-target="#editProductModal" data-product-id="${product.id}"><i class="bi bi-pencil-square"></i></a>
+                        <a href="#" class="delete-product" title="Удалить" data-bs-toggle="modal" data-bs-target="#deleteProductModal" data-product-id="${product.id}" data-product-name="${product.name}"><i class="bi bi-trash3-fill"></i></a>
                     </td>
                 `;
             });
         }
 
         async function fetchAndRenderProducts() {
-            const products = await fetchData(`${apiBaseUrl}/products`);
-            if (products) {
-                renderProducts(products);
-                loadProductsForOperationForms(products); // Загружаем товары в селекты форм операций
+            const result = await fetchData(`${apiBaseUrl}/products`);
+            if (result.success && Array.isArray(result.data)) {
+                allProductsCache = result.data; 
+                applyFilters(); 
+                populateProductSelectsForOperations(allProductsCache);
+            } else {
+                showToast(result.error || 'Не удалось загрузить товары.', 'danger');
+                allProductsCache = [];
+                renderProducts([]); 
             }
         }
 
-        // Добавление товара
         if (addProductForm) {
             addProductForm.addEventListener('submit', async (e) => {
                 e.preventDefault();
                 const formData = new FormData(addProductForm);
-                const productData = Object.fromEntries(formData.entries());
-                // current_stock не задаем при создании, пусть будет 0 по умолчанию или через поступление
-                productData.current_stock = 0; // Установим по умолчанию 0, или можно добавить поле в форму
+                const productData = {
+                    name: formData.get('name'),
+                    category_id: parseInt(formData.get('category_id')),
+                    unit: formData.get('unit'),
+                    description: formData.get('description'),
+                    location: formData.get('location'),
+                    min_stock: parseInt(formData.get('min_stock')),
+                    // current_stock по умолчанию 0 на бэкенде
+                };
 
                 const result = await fetchData(`${apiBaseUrl}/products`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(productData)
                 });
-                if (result && result.id) {
+
+                if (result.success && result.data && result.data.id) {
                     showToast('Товар успешно добавлен!');
-                    fetchAndRenderProducts(); // Обновляем список
+                    fetchAndRenderProducts();
                     const modal = bootstrap.Modal.getInstance(document.getElementById('addProductModal'));
                     modal.hide();
                     addProductForm.reset();
+                    if (addProductCategorySelect.options.length > 0 && addProductCategorySelect.options[0].value === "") {
+                         addProductCategorySelect.selectedIndex = 0;
+                    }
                 } else {
-                    showToast(result ? result.error : 'Ошибка при добавлении товара.', 'danger');
+                    showToast(result.error || 'Ошибка при добавлении товара.', 'danger');
                 }
             });
         }
 
-        // Редактирование товара - открытие модального окна и заполнение
-        document.addEventListener('click', async (e) => {
-            if (e.target.closest('.edit-product')) {
+        productTableBody.addEventListener('click', async (e) => {
+            const editButton = e.target.closest('.edit-product');
+            if (editButton) {
                 e.preventDefault();
-                const row = e.target.closest('tr');
-                const productId = parseInt(row.dataset.productId);
-                currentProductToEdit = await fetchData(`${apiBaseUrl}/products/${productId}`);
-                if (currentProductToEdit && editProductForm) {
-                    document.getElementById('editingProductName').textContent = currentProductToEdit.name;
-                    editProductForm.elements['name'].value = currentProductToEdit.name;
-                    editProductForm.elements['category_id'].value = currentProductToEdit.category_id;
-                    editProductForm.elements['unit'].value = currentProductToEdit.unit;
-                    editProductForm.elements['description'].value = currentProductToEdit.description;
-                    editProductForm.elements['location'].value = currentProductToEdit.location;
-                    editProductForm.elements['min_stock'].value = currentProductToEdit.min_stock;
-                    // current_stock не редактируем напрямую здесь, оно меняется через операции
-                    // editProductForm.elements['current_stock'].value = currentProductToEdit.current_stock;
+                currentProductToEditId = parseInt(editButton.dataset.productId);
+                const productToEdit = allProductsCache.find(p => p.id === currentProductToEditId);
+
+                if (productToEdit && editProductForm) {
+                    document.getElementById('editingProductName').textContent = productToEdit.name;
+                    editProductForm.elements['name'].value = productToEdit.name;
+                    populateSelect(editProductCategorySelect, allCategoriesCache, 'id', 'name', 'Выберите категорию...', productToEdit.category_id);
+                    editProductForm.elements['unit'].value = productToEdit.unit;
+                    editProductForm.elements['description'].value = productToEdit.description || '';
+                    editProductForm.elements['location'].value = productToEdit.location || '';
+                    editProductForm.elements['min_stock'].value = productToEdit.min_stock;
+                } else if (!productToEdit) {
+                     showToast('Не удалось найти данные товара для редактирования.', 'danger');
                 }
             }
-        });
 
-        // Сохранение изменений товара
-        if (editProductForm) {
-            editProductForm.addEventListener('submit', async (e) => {
+            const deleteButton = e.target.closest('.delete-product');
+            if (deleteButton) {
                 e.preventDefault();
-                if (!currentProductToEdit) return;
-
-                const formData = new FormData(editProductForm);
-                const updatedData = Object.fromEntries(formData.entries());
-                updatedData.category_id = parseInt(updatedData.category_id);
-                updatedData.min_stock = parseInt(updatedData.min_stock);
-                // updatedData.current_stock = parseInt(updatedData.current_stock); // Если разрешаем редактировать
-
-                const result = await fetchData(`${apiBaseUrl}/products/${currentProductToEdit.id}`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(updatedData)
-                });
-                if (result && result.id) {
-                    showToast('Товар успешно обновлен!');
-                    fetchAndRenderProducts();
-                    const modal = bootstrap.Modal.getInstance(document.getElementById('editProductModal'));
-                    modal.hide();
-                } else {
-                     showToast(result ? result.error : 'Ошибка при обновлении товара.', 'danger');
-                }
-            });
-        }
-
-        // Удаление товара - открытие модального окна
-         document.addEventListener('click', (e) => {
-            if (e.target.closest('.delete-product')) {
-                e.preventDefault();
-                const row = e.target.closest('tr');
-                currentProductIdToDelete = parseInt(row.dataset.productId);
-                const productName = row.cells[0].textContent;
+                currentProductIdToDelete = parseInt(deleteButton.dataset.productId);
+                const productName = deleteButton.dataset.productName;
                 if (deleteProductModalElement) {
                     deleteProductModalElement.querySelector('#productNameToDelete').textContent = productName;
                 }
             }
         });
 
-        // Подтверждение удаления
+        if (editProductForm) {
+            editProductForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                if (currentProductToEditId === null) return;
+
+                const formData = new FormData(editProductForm);
+                const updatedData = {
+                    name: formData.get('name'),
+                    category_id: parseInt(formData.get('category_id')),
+                    unit: formData.get('unit'),
+                    description: formData.get('description'),
+                    location: formData.get('location'),
+                    min_stock: parseInt(formData.get('min_stock')),
+                };
+
+                const result = await fetchData(`${apiBaseUrl}/products/${currentProductToEditId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(updatedData)
+                });
+
+                if (result.success && result.data && result.data.id) {
+                    showToast('Товар успешно обновлен!');
+                    fetchAndRenderProducts();
+                    const modal = bootstrap.Modal.getInstance(document.getElementById('editProductModal'));
+                    modal.hide();
+                    currentProductToEditId = null;
+                } else {
+                     showToast(result.error || 'Ошибка при обновлении товара.', 'danger');
+                }
+            });
+        }
+
         if (deleteProductConfirmButton) {
             deleteProductConfirmButton.addEventListener('click', async () => {
                 if (currentProductIdToDelete === null) return;
                 const result = await fetchData(`${apiBaseUrl}/products/${currentProductIdToDelete}`, {
                     method: 'DELETE'
                 });
-                if (result) { // Успешное удаление возвращает 204 No Content, или сообщение
-                    showToast(result.message || 'Товар успешно удален!');
+
+                if (result.success) { 
+                    showToast(result.data?.message || result.message || 'Товар успешно удален!');
                     fetchAndRenderProducts();
                     const modal = bootstrap.Modal.getInstance(deleteProductModalElement);
                     modal.hide();
                     currentProductIdToDelete = null;
                 } else {
-                    showToast(result ? result.error : 'Ошибка при удалении товара.', 'danger');
+                    showToast(result.error || 'Ошибка при удалении товара.', 'danger');
                 }
             });
         }
 
-        // Регистрация поступления
+
+        async function registerOperation(formElement, operationType) {
+            const formData = new FormData(formElement);
+            const operationData = {
+                type: operationType,
+                product_id: parseInt(formData.get('product_id')),
+                quantity: parseInt(formData.get('quantity')),
+                date: formData.get('date') || null, // null если пусто, бэкэнд поставит текущую
+                invoice_number: formData.get('invoice_number'),
+                party: formData.get(operationType === "Поступление" ? 'supplier' : 'recipient'),
+                comment: formData.get('comment')
+            };
+
+             if (isNaN(operationData.product_id) || operationData.product_id <= 0) {
+                showToast('Пожалуйста, выберите товар.', 'danger');
+                return;
+            }
+            if (isNaN(operationData.quantity) || operationData.quantity <= 0) {
+                showToast('Количество должно быть положительным числом.', 'danger');
+                return;
+            }
+
+            const result = await fetchData(`${apiBaseUrl}/operations/register`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(operationData)
+            });
+
+            if (result.success && result.data && result.data.id) {
+                showToast(`${operationType} успешно зарегистрировано!`);
+                fetchAndRenderProducts(); // Обновить остатки в таблице товаров
+                if (window.location.pathname.includes('/operations')) { 
+                    fetchAndRenderOperations();
+                }
+                const modalId = operationType === "Поступление" ? 'registerIncomingModal' : 'registerOutgoingModal';
+                const modal = bootstrap.Modal.getInstance(document.getElementById(modalId));
+                modal.hide();
+                formElement.reset();
+                const productSelect = formElement.querySelector('select[name="product_id"]');
+                if (productSelect && productSelect.options.length > 0 && productSelect.options[0].value === "") {
+                    productSelect.selectedIndex = 0;
+                }
+
+            } else {
+                showToast(result.error || `Ошибка регистрации ${operationType === "Поступление" ? "поступления" : "отгрузки"}.`, 'danger');
+            }
+        }
+
         if (registerIncomingForm) {
-            registerIncomingForm.addEventListener('submit', async (e) => {
+            registerIncomingForm.addEventListener('submit', (e) => {
                 e.preventDefault();
-                const formData = new FormData(registerIncomingForm);
-                const operationData = {
-                    type: "Поступление",
-                    product_id: parseInt(formData.get('product_id')),
-                    quantity: parseInt(formData.get('quantity')),
-                    date: formData.get('date'), // Flask сам поставит текущую, если не передать
-                    invoice_number: formData.get('invoice_number'),
-                    party: formData.get('supplier'), // Используем поле поставщика
-                    comment: formData.get('comment')
-                };
-
-                const result = await fetchData(`${apiBaseUrl}/operations/register`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(operationData)
-                });
-
-                if (result && result.id) {
-                    showToast('Поступление успешно зарегистрировано!');
-                    fetchAndRenderProducts(); // Обновить остатки в таблице товаров
-                    // Можно также обновить таблицу операций, если она на этой же странице или перейти на нее
-                    const modal = bootstrap.Modal.getInstance(document.getElementById('registerIncomingModal'));
-                    modal.hide();
-                    registerIncomingForm.reset();
-                } else {
-                    showToast(result ? result.error : 'Ошибка регистрации поступления.', 'danger');
-                }
+                registerOperation(registerIncomingForm, "Поступление");
             });
         }
 
-        // Регистрация отгрузки
         if (registerOutgoingForm) {
-            registerOutgoingForm.addEventListener('submit', async (e) => {
+            registerOutgoingForm.addEventListener('submit', (e) => {
                 e.preventDefault();
-                const formData = new FormData(registerOutgoingForm);
-                 const operationData = {
-                    type: "Отгрузка",
-                    product_id: parseInt(formData.get('product_id')),
-                    quantity: parseInt(formData.get('quantity')),
-                    date: formData.get('date'),
-                    invoice_number: formData.get('invoice_number'),
-                    party: formData.get('recipient'), // Используем поле получателя
-                    comment: formData.get('comment')
-                };
-                const result = await fetchData(`${apiBaseUrl}/operations/register`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(operationData)
-                });
-
-                if (result && result.id) {
-                    showToast('Отгрузка успешно зарегистрирована!');
-                    fetchAndRenderProducts();
-                    const modal = bootstrap.Modal.getInstance(document.getElementById('registerOutgoingModal'));
-                    modal.hide();
-                    registerOutgoingForm.reset();
-                } else {
-                    showToast(result ? result.error : 'Ошибка регистрации отгрузки.', 'danger');
-                }
+                registerOperation(registerOutgoingForm, "Отгрузка");
             });
         }
 
-
-        // Инициализация: загрузка категорий и товаров
-        loadCategoriesForForms().then(() => {
-            fetchAndRenderProducts();
-        });
-
-        // Логика для фильтров (упрощенная, на клиенте)
         const searchNameInput = document.getElementById('searchName');
         const filterLocationInput = document.getElementById('filterLocation');
         const filterAvailabilitySelect = document.getElementById('filterAvailability');
         const filterMinStockCheckbox = document.getElementById('filterMinStock');
-        const filterButton = document.querySelector('.card-header button'); // Если есть кнопка "Применить фильтр"
 
         function applyFilters() {
             const searchTerm = searchNameInput.value.toLowerCase();
-            const categoryFilter = filterCategorySelect.value;
+            const categoryFilterId = filterCategorySelect.value; // Это ID
             const locationFilter = filterLocationInput.value.toLowerCase();
             const availabilityFilter = filterAvailabilitySelect.value;
             const minStockFilter = filterMinStockCheckbox.checked;
 
-            let products = JSON.parse(JSON.stringify(window.originalProducts || [])); // Работаем с копией
+            let filteredProducts = [...allProductsCache]; 
 
             if (searchTerm) {
-                products = products.filter(p => p.name.toLowerCase().includes(searchTerm));
+                filteredProducts = filteredProducts.filter(p => p.name.toLowerCase().includes(searchTerm));
             }
-            if (categoryFilter) {
-                products = products.filter(p => p.category_id == categoryFilter);
+            if (categoryFilterId) { 
+                filteredProducts = filteredProducts.filter(p => p.category_id == categoryFilterId);
             }
             if (locationFilter) {
-                products = products.filter(p => p.location && p.location.toLowerCase().includes(locationFilter));
+                filteredProducts = filteredProducts.filter(p => p.location && p.location.toLowerCase().includes(locationFilter));
             }
             if (availabilityFilter === "in_stock") {
-                products = products.filter(p => p.current_stock > 0);
+                filteredProducts = filteredProducts.filter(p => p.current_stock > 0);
             } else if (availabilityFilter === "out_of_stock") {
-                products = products.filter(p => p.current_stock <= 0);
+                filteredProducts = filteredProducts.filter(p => p.current_stock == 0); 
             }
             if (minStockFilter) {
-                products = products.filter(p => p.current_stock < p.min_stock);
+                filteredProducts = filteredProducts.filter(p => p.current_stock < p.min_stock);
             }
-            renderProducts(products);
+            renderProducts(filteredProducts);
         }
-
-        async function initialLoadAndStore() {
-            const products = await fetchData(`${apiBaseUrl}/products`);
-            if (products) {
-                window.originalProducts = products; // Сохраняем оригинальный список
-                renderProducts(products);
-                loadProductsForOperationForms(products);
-            }
-        }
-
-        // Перезагружаем оригинальные данные при загрузке страницы
-         loadCategoriesForForms().then(() => {
-            initialLoadAndStore();
+        
+        [searchNameInput, filterLocationInput].forEach(el => {
+            if (el) el.addEventListener('input', applyFilters);
+        });
+        [filterCategorySelect, filterAvailabilitySelect, filterMinStockCheckbox].forEach(el => {
+            if (el) el.addEventListener('change', applyFilters);
         });
 
-        // Навешиваем обработчики на изменения фильтров
-        [searchNameInput, filterCategorySelect, filterLocationInput, filterAvailabilitySelect, filterMinStockCheckbox].forEach(el => {
-            if (el) el.addEventListener('input', applyFilters); // 'input' для текстовых, 'change' для select/checkbox
-            if (el && (el.tagName === 'SELECT' || el.type === 'checkbox')) {
-                 el.addEventListener('change', applyFilters);
-            }
-        });
 
-        // Для модальных окон регистрации операций, нужно чтобы select'ы товаров были заполнены
-        // Это уже делается в fetchAndRenderProducts -> loadProductsForOperationForms
-        // Убедимся, что модальные окна Bootstrap корректно работают с динамическим контентом, если он там есть
-        // (в нашем случае, формы статичны, а списки в select-ах обновляются)
+        async function initProductPage() {
+            await loadCategoriesForProductForms();
+            await fetchAndRenderProducts();
+        }
+        initProductPage();
     }
 
 
     // --- ЛОГИКА ДЛЯ СТРАНИЦЫ ЖУРНАЛА ОПЕРАЦИЙ (operations_log.html) ---
-    if (currentPath.includes('/operations_log') || currentPath.includes('/operations') && !currentPath.includes('/api')) { // Учитываем /operations для Flask маршрута
-        const operationsTableBody = document.querySelector('#operationsTableBody'); // Добавьте id="operationsTableBody" к tbody
-        const filterForm = document.querySelector('#operationsFilterForm'); // Добавьте id форме фильтров
+    if (currentPath.includes('/operations') && !currentPath.includes('/api')) {
+        const operationsTableBody = document.getElementById('operationsTableBody');
+        const filterForm = document.getElementById('operationsFilterForm');
 
         function renderOperations(operations) {
             if (!operationsTableBody) return;
@@ -431,11 +441,21 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             operations.forEach(op => {
                 const row = operationsTableBody.insertRow();
+                let displayDate = 'N/A';
+                if (op.date) {
+                    try {
+                        displayDate = new Date(op.date).toLocaleString('ru-RU', {
+                            year: 'numeric', month: '2-digit', day: '2-digit',
+                            hour: '2-digit', minute: '2-digit'
+                        });
+                    } catch (e) { console.error("Error parsing operation date:", op.date, e); }
+                }
+
                 row.innerHTML = `
-                    <td>${new Date(op.date).toLocaleString('ru-RU')}</td>
-                    <td><span class="badge bg-${op.type === 'Поступление' ? 'success' : 'warning text-dark'}">${op.type}</span></td>
-                    <td>${op.product_name}</td>
-                    <td>${op.quantity}</td>
+                    <td>${displayDate}</td>
+                    <td><span class="badge ${op.type === 'Поступление' ? 'bg-success' : 'bg-warning text-dark'}">${op.type || 'N/A'}</span></td>
+                    <td>${op.product_name || 'N/A'}</td>
+                    <td>${op.quantity !== undefined ? op.quantity : 'N/A'}</td>
                     <td>${op.invoice_number || '-'}</td>
                     <td>${op.party || '-'}</td>
                     <td>${op.comment || '-'}</td>
@@ -444,10 +464,28 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         async function fetchAndRenderOperations(params = {}) {
-            const queryParams = new URLSearchParams(params).toString();
-            const operations = await fetchData(`${apiBaseUrl}/operations${queryParams ? '?' + queryParams : ''}`);
-            if (operations) {
-                renderOperations(operations);
+            const queryParams = new URLSearchParams();
+            if (params.startDate) queryParams.append('start_date', params.startDate);
+            if (params.endDate) queryParams.append('end_date', params.endDate);
+            if (params.operationType && params.operationType !== "all") queryParams.append('type', params.operationType);
+
+            const result = await fetchData(`${apiBaseUrl}/operations`);
+            
+            if (result.success && Array.isArray(result.data)) {
+                let operationsToRender = result.data;
+                if (params.startDate) {
+                    operationsToRender = operationsToRender.filter(op => new Date(op.date) >= new Date(params.startDate));
+                }
+                if (params.endDate) {
+                     operationsToRender = operationsToRender.filter(op => new Date(op.date) <= new Date(new Date(params.endDate).setHours(23,59,59,999))); // Включая конец дня
+                }
+                if (params.operationType && params.operationType !== "all") {
+                    operationsToRender = operationsToRender.filter(op => op.type === params.operationType);
+                }
+                renderOperations(operationsToRender);
+            } else {
+                showToast(result.error || 'Не удалось загрузить операции.', 'danger');
+                renderOperations([]);
             }
         }
 
@@ -456,20 +494,59 @@ document.addEventListener('DOMContentLoaded', () => {
                 e.preventDefault();
                 const formData = new FormData(filterForm);
                 const params = {
-                    start_date: formData.get('startDate'),
-                    end_date: formData.get('endDate'),
-                    operation_type: formData.get('operationType')
+                    startDate: formData.get('startDate'),
+                    endDate: formData.get('endDate'),
+                    operationType: formData.get('operationType')
                 };
-                // Удаляем пустые параметры, чтобы не засорять URL
-                for (const key in params) {
-                    if (!params[key]) {
-                        delete params[key];
-                    }
-                }
-                fetchAndRenderOperations(params); // На бэкенде пока нет фильтрации по этим параметрам
+                fetchAndRenderOperations(params);
             });
+            const today = new Date().toISOString().split('T')[0];
+            const startDateInput = document.getElementById('startDate');
+            const endDateInput = document.getElementById('endDate');
+            if(startDateInput && !startDateInput.value) startDateInput.value = today; // Если пусто, ставим сегодня
+            if(endDateInput && !endDateInput.value) endDateInput.value = today;
         }
         fetchAndRenderOperations(); // Первоначальная загрузка
+    }
+    const showClearLogModalButton = document.getElementById('showClearLogModalButton');
+    const clearLogConfirmationModalElement = document.getElementById('clearLogConfirmationModal');
+    const confirmClearLogButton = document.getElementById('confirmClearLogButton');
+    const clearLogConfirmationInput = document.getElementById('clearLogConfirmationInput');
+    const clearLogError = document.getElementById('clearLogError');
+    let clearLogModalInstance = null;
+
+    if (clearLogConfirmationModalElement) {
+        clearLogModalInstance = new bootstrap.Modal(clearLogConfirmationModalElement);
+    }
+
+    if (showClearLogModalButton && clearLogModalInstance) {
+        showClearLogModalButton.addEventListener('click', () => {
+            clearLogConfirmationInput.value = ''; // Сброс поля ввода
+            clearLogError.textContent = ''; // Сброс сообщения об ошибке
+            clearLogModalInstance.show();
+        });
+    }
+
+    if (confirmClearLogButton && clearLogConfirmationInput) {
+        confirmClearLogButton.addEventListener('click', async () => {
+            if (clearLogConfirmationInput.value !== "УДАЛИТЬ") {
+                clearLogError.textContent = 'Введено неверное слово для подтверждения.';
+                return;
+            }
+            clearLogError.textContent = ''; 
+
+            const result = await fetchData(`${apiBaseUrl}/operations/clear`, {
+                method: 'DELETE'
+            });
+
+            if (result.success) {
+                showToast(result.data?.message || result.message || 'Журнал операций успешно очищен!', 'success');
+                fetchAndRenderOperations();
+            } else {
+                showToast(result.error || 'Ошибка при очистке журнала.', 'danger');
+            }
+            clearLogModalInstance.hide();
+        });
     }
 
 
@@ -480,22 +557,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const conditionalInputsContainer = document.getElementById('conditionalInputsContainer');
         const reportResultsArea = document.getElementById('reportResultsArea');
         const exportButtonsContainer = document.getElementById('exportButtons');
+        const exportCsvButton = document.getElementById('exportCsvButton');
+        const exportPdfButton = document.getElementById('exportPdfButton'); 
+        let currentReportResponse = null; 
 
-        let currentReportData = null; // Для экспорта
-
-        // Функция для динамического добавления полей в зависимости от типа отчета
-        // (уже есть в HTML, но продублируем/уточним логику в JS для полноты)
-        async function updateConditionalInputs() {
+        async function updateConditionalInputsForReports() {
             conditionalInputsContainer.innerHTML = '';
             const selectedType = reportTypeSelect.value;
-            let productOptionsHtml = '';
-
-            if (selectedType === 'product_movement_period') {
-                const products = await fetchData(`${apiBaseUrl}/products`);
-                if (products) {
-                     products.forEach(p => productOptionsHtml += `<option value="${p.id}">${p.name}</option>`);
-                }
-            }
 
             if (selectedType === 'operations_period' || selectedType === 'product_movement_period') {
                 conditionalInputsContainer.innerHTML = `
@@ -510,6 +578,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 `;
             }
             if (selectedType === 'product_movement_period') {
+                const productsResult = await fetchData(`${apiBaseUrl}/products`); 
+                let productOptionsHtml = '';
+                if (productsResult.success && Array.isArray(productsResult.data)) {
+                     productsResult.data.forEach(p => productOptionsHtml += `<option value="${p.id}">${p.name}</option>`);
+                }
                 conditionalInputsContainer.innerHTML += `
                     <div class="mb-3">
                         <label for="reportProductSelect" class="form-label">Выберите товар:</label>
@@ -523,33 +596,50 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (reportTypeSelect) {
-            reportTypeSelect.addEventListener('change', updateConditionalInputs);
-            updateConditionalInputs(); // Первоначальный вызов для загрузки товаров, если выбран нужный тип
+            reportTypeSelect.addEventListener('change', updateConditionalInputsForReports);
+            updateConditionalInputsForReports(); 
         }
 
-
-        function renderReport(report) {
+        function renderReport(reportResponse) { 
             reportResultsArea.innerHTML = '';
             exportButtonsContainer.style.display = 'none';
-            currentReportData = null;
+            currentReportResponse = null;
 
-            if (!report || !report.data || report.data.length === 0) {
-                reportResultsArea.innerHTML = `<p class="text-muted">Данные для отчета "${report.title || ''}" не найдены или отчет пуст.</p>`;
+            if (!reportResponse || !reportResponse.data) {
+                reportResultsArea.innerHTML = `<p class="text-muted">Ошибка при загрузке отчета или отчет пуст.</p>`;
+                showToast(reportResponse?.message || 'Данные для отчета не найдены.', 'warning');
+                return;
+            }
+            
+            if (reportResponse.data.length === 0) {
+                reportResultsArea.innerHTML = `<h5 class="mb-3">${reportResponse.title || 'Отчет'}</h5> <p class="text-muted">Данные для этого отчета отсутствуют.</p>`;
                 return;
             }
 
-            currentReportData = report.data; // Сохраняем для экспорта
-            let tableHTML = `<h5 class="mb-3">${report.title}</h5>`;
+
+            currentReportResponse = reportResponse; 
+            let tableHTML = `<h5 class="mb-3">${reportResponse.title}</h5>`;
             tableHTML += '<div class="table-responsive"><table class="table table-sm table-bordered table-striped">';
-            // Заголовки
+            
             tableHTML += '<thead><tr>';
-            report.columns.forEach(col => tableHTML += `<th>${col}</th>`);
+            reportResponse.columns.forEach(col => tableHTML += `<th>${col}</th>`);
             tableHTML += '</tr></thead>';
-            // Данные
+            
             tableHTML += '<tbody>';
-            report.data.forEach(row => {
+            reportResponse.data.forEach(row => {
                 tableHTML += '<tr>';
-                report.columns.forEach(col => tableHTML += `<td>${row[col] !== undefined && row[col] !== null ? row[col] : '-'}</td>`);
+                reportResponse.columns.forEach(col => {
+                    let cellValue = row[col];
+                    if (typeof col === 'string' && col.toLowerCase() === 'дата' && typeof cellValue === 'string' && cellValue.includes('T')) {
+                         try {
+                            cellValue = new Date(cellValue).toLocaleString('ru-RU', {
+                                year: 'numeric', month: '2-digit', day: '2-digit',
+                                hour: '2-digit', minute: '2-digit'
+                            });
+                        } catch(e) { /* оставляем как есть, если не парсится */ }
+                    }
+                    tableHTML += `<td>${cellValue !== undefined && cellValue !== null ? cellValue : '-'}</td>`;
+                });
                 tableHTML += '</tr>';
             });
             tableHTML += '</tbody></table></div>';
@@ -563,47 +653,63 @@ document.addEventListener('DOMContentLoaded', () => {
                 e.preventDefault();
                 const reportType = reportTypeSelect.value;
                 if (!reportType) {
-                    alert('Пожалуйста, выберите тип отчета.');
+                    showToast('Пожалуйста, выберите тип отчета.', 'warning');
                     return;
                 }
-                const formData = new FormData(reportForm);
                 const params = new URLSearchParams();
-                // Добавляем параметры из conditionalInputsContainer
                 const conditionalInputs = conditionalInputsContainer.querySelectorAll('input, select');
+                let allFieldsValid = true;
                 conditionalInputs.forEach(input => {
+                    if (input.required && !input.value) {
+                        allFieldsValid = false;
+                        input.classList.add('is-invalid'); // Bootstrap класс для подсветки
+                    } else {
+                        input.classList.remove('is-invalid');
+                    }
                     if (input.name && input.value) {
                         params.append(input.name, input.value);
                     }
                 });
 
-                const report = await fetchData(`${apiBaseUrl}/reports/${reportType}?${params.toString()}`);
-                if(report) {
-                    renderReport(report);
+                if (!allFieldsValid) {
+                    showToast('Пожалуйста, заполните все обязательные поля для отчета.', 'danger');
+                    return;
+                }
+
+                const result = await fetchData(`${apiBaseUrl}/reports/${reportType}?${params.toString()}`);
+                if(result.success) {
+                    renderReport(result.data);
                 } else {
-                     reportResultsArea.innerHTML = `<p class="text-danger">Не удалось сформировать отчет.</p>`;
+                     reportResultsArea.innerHTML = `<p class="text-danger">${result.error || 'Не удалось сформировать отчет.'}</p>`;
                      exportButtonsContainer.style.display = 'none';
                 }
             });
         }
 
-        // Экспорт (простая реализация CSV)
-        const exportCsvButton = exportButtonsContainer ? exportButtonsContainer.querySelector('.btn-success') : null;
         if (exportCsvButton) {
             exportCsvButton.addEventListener('click', () => {
-                if (!currentReportData || currentReportData.length === 0) {
-                    alert("Нет данных для экспорта.");
+                if (!currentReportResponse || !currentReportResponse.data || currentReportResponse.data.length === 0) {
+                    showToast("Нет данных для экспорта.", "warning");
                     return;
                 }
-                const reportTitle = reportResultsArea.querySelector('h5') ? reportResultsArea.querySelector('h5').textContent : "report";
-                const columns = Object.keys(currentReportData[0]);
-                let csvContent = "data:text/csv;charset=utf-8," + columns.join(";") + "\n";
+                const { title, columns, data } = currentReportResponse;
+                let csvContent = "data:text/csv;charset=utf-8,\uFEFF"; // \uFEFF for BOM UTF-8 Excel
+                csvContent += columns.join(";") + "\n";
 
-                currentReportData.forEach(row => {
+                data.forEach(row => {
                     const values = columns.map(col => {
                         let cellValue = row[col] !== undefined && row[col] !== null ? String(row[col]) : "";
-                        cellValue = cellValue.replace(/"/g, '""'); // Экранирование кавычек
+                        if (typeof col === 'string' && col.toLowerCase() === 'дата' && typeof cellValue === 'string' && cellValue.includes('T')) {
+                             try {
+                                cellValue = new Date(cellValue).toLocaleString('ru-RU', {
+                                    year: 'numeric', month: '2-digit', day: '2-digit',
+                                    hour: '2-digit', minute: '2-digit'
+                                });
+                            } catch(e) { /* оставляем как есть */ }
+                        }
+                        cellValue = cellValue.replace(/"/g, '""'); 
                         if (cellValue.includes(';') || cellValue.includes('\n') || cellValue.includes(',')) {
-                            cellValue = `"${cellValue}"`; // Оборачиваем в кавычки, если есть разделители
+                            cellValue = `"${cellValue}"`; 
                         }
                         return cellValue;
                     });
@@ -613,53 +719,90 @@ document.addEventListener('DOMContentLoaded', () => {
                 const encodedUri = encodeURI(csvContent);
                 const link = document.createElement("a");
                 link.setAttribute("href", encodedUri);
-                link.setAttribute("download", `${reportTitle.replace(/\s+/g, '_')}.csv`);
+                const fileName = title ? title.replace(/[^a-zа-я0-9\s-]/gi, '').replace(/\s+/g, '_') : 'report';
+                link.setAttribute("download", `${fileName}.csv`);
                 document.body.appendChild(link);
                 link.click();
                 document.body.removeChild(link);
-                showToast("Отчет экспортирован в CSV");
+                showToast("Отчет экспортирован в CSV", "success");
             });
         }
-         // Кнопка PDF (заглушка, т.к. генерация PDF на клиенте сложнее)
-        const exportPdfButton = exportButtonsContainer ? exportButtonsContainer.querySelector('.btn-danger') : null;
-        if (exportPdfButton) {
+        if (exportPdfButton) { 
+            
             exportPdfButton.addEventListener('click', () => {
-                alert("Экспорт в PDF пока не реализован. Используйте печать страницы в PDF (Ctrl+P) или специализированные библиотеки.");
-                // Для реальной генерации PDF можно использовать jsPDF, html2pdf.js
+                if (!currentReportResponse || !currentReportResponse.data || currentReportResponse.data.length === 0) {
+                    showToast("Нет данных для экспорта в PDF.", "warning");
+                    return;
+                }
+
+                const reportType = reportTypeSelect.value;
+                if (!reportType) {
+                    showToast('Тип отчета не выбран для экспорта в PDF.', 'warning');
+                    return;
+                }
+
+                const params = new URLSearchParams();
+                const conditionalInputs = conditionalInputsContainer.querySelectorAll('input, select');
+                let allFieldsValid = true;
+                conditionalInputs.forEach(input => {
+                    if (input.required && !input.value) {
+                        allFieldsValid = false;
+                    }
+                    if (input.name && input.value) {
+                        params.append(input.name, input.value);
+                    }
+                });
+
+                if (!allFieldsValid && (reportType === 'operations_period' || reportType === 'product_movement_period')) {
+                    showToast('Пожалуйста, заполните все обязательные поля для выбранного типа отчета перед экспортом в PDF.', 'danger');
+                    return;
+                }
+                
+                let pdfUrl = `${apiBaseUrl}/reports/${reportType}/pdf`;
+                if (params.toString()) {
+                    pdfUrl += `?${params.toString()}`;
+                }
+
+                window.open(pdfUrl, '_blank');
+                showToast("Запрос на формирование PDF отправлен. Загрузка начнется автоматически.", "info");
             });
         }
-
     }
 
 
     // --- ЛОГИКА ДЛЯ СТРАНИЦЫ УПРАВЛЕНИЯ КАТЕГОРИЯМИ (categories.html) ---
-    if (currentPath.includes('/categories-management')) { // Соответствует Flask маршруту
-        const categoriesListElement = document.getElementById('categoriesList'); // Нужен id="categoriesList" для ul/div списка
+    if (currentPath.includes('/categories-management')) {
+        const categoriesListElement = document.getElementById('categoriesList');
         const addCategoryForm = document.getElementById('addCategoryForm');
-        const editCategoryForm = document.getElementById('editCategoryForm'); // В модальном окне
+        const editCategoryForm = document.getElementById('editCategoryForm');
         const editCategoryModalElement = document.getElementById('editCategoryModal');
         const deleteCategoryModalElement = document.getElementById('deleteCategoryModal');
-        const deleteCategoryConfirmButton = deleteCategoryModalElement ? deleteCategoryModalElement.querySelector('.btn-danger') : null;
+        const deleteCategoryConfirmButton = document.getElementById('confirmDeleteCategory');
 
         let currentCategoryIdToEdit = null;
+        let currentCategoryNameToEdit = '';
         let currentCategoryIdToDelete = null;
 
-        function renderCategories(categories) {
-            if (!categoriesListElement) { // Предполагаем, что это <ul class="list-group">
-                 console.error("Элемент #categoriesList не найден");
-                 return;
-            }
+
+        function renderCategoriesList(categories) {
+            if (!categoriesListElement) return;
             categoriesListElement.innerHTML = '';
             if (!categories || categories.length === 0) {
-                categoriesListElement.innerHTML = '<li class="list-group-item">Категории не найдены.</li>';
+                categoriesListElement.innerHTML = '<li class="list-group-item text-center text-muted">Категории не найдены.</li>';
                 return;
             }
             categories.forEach(cat => {
                 const li = document.createElement('li');
                 li.className = 'list-group-item d-flex justify-content-between align-items-center';
                 li.dataset.categoryId = cat.id;
+                li.dataset.categoryName = cat.name;
+                li.dataset.categoryDescription = cat.description || '';
+
                 li.innerHTML = `
-                    ${cat.name}
+                    <div>
+                        <strong>${cat.name}</strong>
+                        ${cat.description ? `<br><small class="text-muted">${cat.description}</small>` : ''}
+                    </div>
                     <span class="action-icons">
                         <a href="#" class="edit-category" data-bs-toggle="modal" data-bs-target="#editCategoryModal" title="Редактировать"><i class="bi bi-pencil-square"></i></a>
                         <a href="#" class="delete-category" data-bs-toggle="modal" data-bs-target="#deleteCategoryModal" title="Удалить"><i class="bi bi-trash3-fill"></i></a>
@@ -669,55 +812,68 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
 
-        async function fetchAndRenderCategories() {
-            const categories = await fetchData(`${apiBaseUrl}/categories`);
-            if (categories) {
-                renderCategories(categories);
+        async function fetchAndRenderCategoriesPage() {
+            const result = await fetchData(`${apiBaseUrl}/categories`);
+            if (result.success && Array.isArray(result.data)) {
+                allCategoriesCache = result.data;
+                renderCategoriesList(result.data);
+            } else {
+                showToast(result.error || 'Не удалось загрузить категории.', 'danger');
+                renderCategoriesList([]);
             }
         }
 
         if (addCategoryForm) {
             addCategoryForm.addEventListener('submit', async (e) => {
                 e.preventDefault();
-                const categoryName = document.getElementById('newCategoryName').value;
-                if (!categoryName.trim()) {
-                    alert("Название категории не может быть пустым.");
+                const categoryNameInput = document.getElementById('newCategoryName');
+                const categoryName = categoryNameInput.value.trim();
+
+                if (!categoryName) {
+                    showToast("Название категории не может быть пустым.", 'warning');
+                    categoryNameInput.focus();
                     return;
                 }
                 const result = await fetchData(`${apiBaseUrl}/categories`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name: categoryName })
+                    body: JSON.stringify({ name: categoryName /*, description: categoryDescription */})
                 });
-                if (result && result.id) {
+
+                if (result.success && result.data && result.data.id) {
                     showToast('Категория успешно добавлена!');
-                    fetchAndRenderCategories();
+                    fetchAndRenderCategoriesPage();
                     addCategoryForm.reset();
                 } else {
-                    showToast(result ? result.error : 'Ошибка при добавлении категории.', 'danger');
+                    showToast(result.error || 'Ошибка при добавлении категории.', 'danger');
                 }
             });
         }
 
-        document.addEventListener('click', async (e) => {
+        categoriesListElement.addEventListener('click', (e) => {
+            const listItem = e.target.closest('li.list-group-item');
+            if (!listItem) return;
+
             const editLink = e.target.closest('.edit-category');
             const deleteLink = e.target.closest('.delete-category');
 
             if (editLink) {
                 e.preventDefault();
-                const listItem = editLink.closest('li');
                 currentCategoryIdToEdit = parseInt(listItem.dataset.categoryId);
-                const categoryName = listItem.firstChild.textContent.trim(); // Получаем текст категории
+                currentCategoryNameToEdit = listItem.dataset.categoryName;
+                const currentCategoryDescription = listItem.dataset.categoryDescription;
+
                 if (editCategoryForm) {
-                     editCategoryForm.elements['editCategoryName'].value = categoryName;
+                     editCategoryForm.elements['editCategoryName'].value = currentCategoryNameToEdit;
+ 
+                     document.getElementById('editingCategoryNamePlaceholder').textContent = currentCategoryNameToEdit; 
                 }
             }
 
             if (deleteLink) {
                 e.preventDefault();
-                 const listItem = deleteLink.closest('li');
                 currentCategoryIdToDelete = parseInt(listItem.dataset.categoryId);
-                const categoryName = listItem.firstChild.textContent.trim();
+                const categoryName = listItem.dataset.categoryName;
                  if (deleteCategoryModalElement) {
                     deleteCategoryModalElement.querySelector('#categoryNameToDelete').textContent = categoryName;
                 }
@@ -728,23 +884,29 @@ document.addEventListener('DOMContentLoaded', () => {
             editCategoryForm.addEventListener('submit', async (e) => {
                 e.preventDefault();
                 if (currentCategoryIdToEdit === null) return;
-                const newName = editCategoryForm.elements['editCategoryName'].value;
-                 if (!newName.trim()) {
-                    alert("Название категории не может быть пустым.");
+
+                const newNameInput = editCategoryForm.elements['editCategoryName'];
+                const newName = newNameInput.value.trim();
+
+                 if (!newName) {
+                    showToast("Название категории не может быть пустым.", 'warning');
+                    newNameInput.focus();
                     return;
                 }
                 const result = await fetchData(`${apiBaseUrl}/categories/${currentCategoryIdToEdit}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name: newName })
+                    body: JSON.stringify({ name: newName /*, description: newDescription */ })
                 });
-                if (result && result.id) {
+
+                if (result.success && result.data && result.data.id) {
                     showToast('Категория успешно обновлена!');
-                    fetchAndRenderCategories();
+                    fetchAndRenderCategoriesPage();
                     const modal = bootstrap.Modal.getInstance(editCategoryModalElement);
                     modal.hide();
+                    currentCategoryIdToEdit = null;
                 } else {
-                    showToast(result ? result.error : 'Ошибка при обновлении категории.', 'danger');
+                    showToast(result.error || 'Ошибка при обновлении категории.', 'danger');
                 }
             });
         }
@@ -755,19 +917,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 const result = await fetchData(`${apiBaseUrl}/categories/${currentCategoryIdToDelete}`, {
                     method: 'DELETE'
                 });
-                 if (result && (result.message || response.status === 204)) {
-                    showToast(result.message || 'Категория успешно удалена!');
-                    fetchAndRenderCategories();
+                if (result.success) { // result.status === 200 || result.status === 204
+                    showToast(result.data?.message || result.message || 'Категория успешно удалена!');
+                    fetchAndRenderCategoriesPage(); 
                     const modal = bootstrap.Modal.getInstance(deleteCategoryModalElement);
                     modal.hide();
                     currentCategoryIdToDelete = null;
                 } else {
-                    showToast(result ? result.error : 'Ошибка при удалении категории.', 'danger');
+                    showToast(result.error || 'Ошибка при удалении категории.', 'danger');
                 }
             });
         }
-
-        fetchAndRenderCategories(); // Первоначальная загрузка
+        fetchAndRenderCategoriesPage();
     }
-
 });
